@@ -491,6 +491,365 @@ const navigatorColumns: DataTableColumn<NavigatorAgreement>[] = [
   },
 ];
 
+/* ═══════════════════════════════════════
+   Completed → Documents (clause analysis)
+   ═══════════════════════════════════════ */
+
+const CLAUSES = ['Confidentiality', 'Governing law', 'Non-compete', 'Termination for convenience', 'Limitation of liability', 'Indemnification', 'Data protection', 'Auto-renewal'] as const;
+type Clause = typeof CLAUSES[number];
+type DocStatus = 'Active' | 'Expired' | 'Effective soon';
+
+interface ClauseDocument {
+  id: string;
+  fileName: string;
+  agreementType: string;
+  personIds: string[];
+  status: DocStatus;
+  statusDate: string;
+  found: Clause[];
+  notFound: Clause[];
+}
+
+const clauseSplit = (found: Clause[]): Pick<ClauseDocument, 'found' | 'notFound'> => ({ found, notFound: CLAUSES.filter((c) => !found.includes(c)) });
+
+const CLAUSE_DOCUMENTS: ClauseDocument[] = [
+  { id: 'cd1', fileName: 'Blake Hayes – Employment Agreement.pdf', agreementType: 'Employment Agreement', personIds: ['p1'], status: 'Active', statusDate: 'Effective 3/14/2022', ...clauseSplit(['Confidentiality', 'Governing law', 'Non-compete', 'Termination for convenience']) },
+  { id: 'cd2', fileName: 'Daniel Garcia – Offer Letter.pdf', agreementType: 'Offer Letter', personIds: ['p2'], status: 'Active', statusDate: 'Effective 9/6/2023', ...clauseSplit(['Confidentiality', 'Governing law']) },
+  { id: 'cd3', fileName: 'David Lambert – Internship Agreement.pdf', agreementType: 'Internship Agreement', personIds: ['p3'], status: 'Active', statusDate: 'Expires 8/29/2026', ...clauseSplit(['Confidentiality', 'Governing law', 'Data protection']) },
+  { id: 'cd4', fileName: 'Dale Simmons – Offer Letter.pdf', agreementType: 'Offer Letter', personIds: ['d1', 'd2'], status: 'Active', statusDate: 'Effective 2/3/2025', ...clauseSplit(['Governing law', 'Termination for convenience']) },
+  { id: 'cd5', fileName: 'Harry van Leest – Employment Agreement.pdf', agreementType: 'Employment Agreement', personIds: ['p7'], status: 'Active', statusDate: 'Effective 1/10/2021', ...clauseSplit(['Confidentiality', 'Governing law', 'Termination for convenience', 'Data protection']) },
+  { id: 'cd6', fileName: 'John Havering – Non-Disclosure Agreement.pdf', agreementType: 'Non-Disclosure Agreement', personIds: ['p8'], status: 'Expired', statusDate: 'Expired 8/22/2025', ...clauseSplit(['Confidentiality', 'Governing law', 'Indemnification']) },
+  { id: 'cd7', fileName: 'Linda Simon – Contractor Agreement.pdf', agreementType: 'Contractor Agreement', personIds: ['p9'], status: 'Active', statusDate: 'Expires 10/20/2026', ...clauseSplit(['Confidentiality', 'Limitation of liability', 'Indemnification', 'Auto-renewal']) },
+  { id: 'cd8', fileName: 'Mary Wilson – Employment Agreement.pdf', agreementType: 'Employment Agreement', personIds: ['p10'], status: 'Active', statusDate: 'Effective 11/2/2019', ...clauseSplit(['Confidentiality', 'Governing law', 'Data protection']) },
+  { id: 'cd9', fileName: 'Michael Berger – Retention Bonus Agreement.pdf', agreementType: 'Retention Agreement', personIds: ['p11'], status: 'Effective soon', statusDate: 'Effective 7/16/2026', ...clauseSplit(['Confidentiality', 'Governing law']) },
+  { id: 'cd10', fileName: 'Blake Hayes – Equity Award Agreement.pdf', agreementType: 'Equity Agreement', personIds: ['p1'], status: 'Active', statusDate: 'Expires 12/31/2026', ...clauseSplit(['Governing law', 'Termination for convenience', 'Limitation of liability']) },
+  { id: 'cd11', fileName: 'Linda Simon – Statement of Work.pdf', agreementType: 'Statement of Work', personIds: ['p9'], status: 'Expired', statusDate: 'Expired 2/19/2026', ...clauseSplit(['Limitation of liability', 'Auto-renewal']) },
+  { id: 'cd12', fileName: 'Mary Wilson – Relocation Agreement.pdf', agreementType: 'Relocation Agreement', personIds: ['p10'], status: 'Active', statusDate: 'Expires 9/30/2026', ...clauseSplit(['Confidentiality', 'Governing law', 'Termination for convenience']) },
+];
+
+const DOC_TYPES = [...new Set(CLAUSE_DOCUMENTS.map((d) => d.agreementType))].sort();
+const DOC_STATUSES: DocStatus[] = ['Active', 'Effective soon', 'Expired'];
+
+interface DocFilters { status: DocStatus[]; type: string[]; found: Clause[]; notFound: Clause[] }
+const NO_FILTERS: DocFilters = { status: [], type: [], found: [], notFound: [] };
+const filterCount = (f: DocFilters) => f.status.length + f.type.length + f.found.length + f.notFound.length;
+
+interface SavedSearch { id: string; name: string; description: string; query: string; filters: DocFilters; simulateError?: boolean }
+const SAVED_SEARCHES: SavedSearch[] = [
+  { id: 'missing-noncompete', name: 'Missing non-compete', description: 'Employment documents without a non-compete clause', query: '', filters: { ...NO_FILTERS, notFound: ['Non-compete'], type: ['Employment Agreement', 'Offer Letter'] } },
+  { id: 'expiring', name: 'Expiring soon', description: 'Agreements that expire in 2026', query: 'expiring', filters: NO_FILTERS },
+  { id: 'flagged', name: 'Flagged by Iris', description: 'Documents Iris marked for legal review', query: 'flagged for legal review', filters: NO_FILTERS },
+  { id: 'unavailable', name: 'Quarterly compliance sweep', description: 'Runs against the compliance index', query: '', filters: NO_FILTERS, simulateError: true },
+];
+
+const clauseKeyword = (clause: Clause) => clause.toLowerCase().split(/[ -]/)[0];
+
+/** Small rule-based reading of a natural-language query; enough to feel like AI search in a prototype. */
+function interpretQuery(raw: string) {
+  const q = raw.toLowerCase().trim();
+  const missing: Clause[] = [];
+  const found: Clause[] = [];
+  let rest = q;
+  CLAUSES.forEach((clause) => {
+    const kw = clauseKeyword(clause);
+    const hit = new RegExp(`(missing|without|lacking|\\bno)\\s+(an?\\s+|the\\s+)?${kw}`).test(q);
+    const has = new RegExp(`(with|has|having|containing|including)\\s+(an?\\s+|the\\s+)?${kw}`).test(q);
+    if (hit) { missing.push(clause); rest = rest.replace(new RegExp(`(missing|without|lacking|\\bno)\\s+(an?\\s+|the\\s+)?${kw}[\\w-]*(\\s+clause)?`), ' '); }
+    else if (has) { found.push(clause); rest = rest.replace(new RegExp(`(with|has|having|containing|including)\\s+(an?\\s+|the\\s+)?${kw}[\\w-]*(\\s+clause)?`), ' '); }
+  });
+  const expiring = /expir/.test(rest);
+  const flagged = /flagged|legal review/.test(rest);
+  const stop = new Set(['which', 'what', 'show', 'me', 'all', 'the', 'of', 'in', 'days', 'agreements', 'documents', 'that', 'are', 'for', 'and', 'with', 'clause', 'expiring', 'expire', 'expires', 'expired', 'flagged', 'legal', 'review', '90', 'soon']);
+  const terms = rest.split(/[^a-z0-9.–-]+/).filter((t) => t.length > 1 && !stop.has(t));
+  return { missing, found, expiring, flagged, terms };
+}
+
+function runDocumentSearch(query: string, filters: DocFilters): { rows: ClauseDocument[]; chips: string[] } {
+  const ai = interpretQuery(query);
+  const chips = [
+    ...ai.missing.map((c) => `Clause not found: ${c}`),
+    ...ai.found.map((c) => `Clause found: ${c}`),
+    ...(ai.expiring ? ['Expiring or expired'] : []),
+    ...(ai.flagged ? ['Flagged for legal review'] : []),
+    ...ai.terms.map((t) => `Text: “${t}”`),
+  ];
+  const rows = CLAUSE_DOCUMENTS.filter((doc) => {
+    const people = doc.personIds.map((id) => PEOPLE_DATA.find((p) => p.id === id)?.name ?? '').join(' ');
+    const haystack = `${doc.fileName} ${doc.agreementType} ${people}`.toLowerCase();
+    if (ai.terms.some((t) => !haystack.includes(t))) return false;
+    if (ai.missing.some((c) => !doc.notFound.includes(c))) return false;
+    if (ai.found.some((c) => !doc.found.includes(c))) return false;
+    if (ai.expiring && !/^Expire/.test(doc.statusDate)) return false;
+    if (ai.flagged) return false;
+    if (filters.status.length && !filters.status.includes(doc.status)) return false;
+    if (filters.type.length && !filters.type.includes(doc.agreementType)) return false;
+    if (filters.found.some((c) => !doc.found.includes(c))) return false;
+    if (filters.notFound.some((c) => !doc.notFound.includes(c))) return false;
+    return true;
+  });
+  return { rows, chips };
+}
+
+type DocsPhase = 'loading' | 'ready' | 'error';
+
+function ClauseList({ clauses, kind }: { clauses: Clause[]; kind: 'found' | 'notFound' }) {
+  if (clauses.length === 0) return <Text size="sm" color="secondary">None</Text>;
+  const shown = clauses.slice(0, 2);
+  const extra = clauses.slice(2);
+  return (
+    <Stack gap="small" align="start">
+      {shown.map((clause) => (
+        <Badge key={clause} kind={kind === 'found' ? 'success' : 'warning'}>
+          {clause}
+        </Badge>
+      ))}
+      {extra.length > 0 && (
+        <Tooltip text={extra.join(', ')} location="above">
+          <Text size="xs" color="secondary">{`+${extra.length} more`}</Text>
+        </Tooltip>
+      )}
+    </Stack>
+  );
+}
+
+function useCompletedDocuments(onAskIris: () => void) {
+  const [draft, setDraft] = useState('');
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<DocFilters>(NO_FILTERS);
+  const [pendingFilters, setPendingFilters] = useState<DocFilters>(NO_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [phase, setPhase] = useState<DocsPhase>('loading');
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const timer = useRef<number | undefined>(undefined);
+
+  const settle = (next: DocsPhase, delay = 450) => {
+    window.clearTimeout(timer.current);
+    setPhase('loading');
+    timer.current = window.setTimeout(() => setPhase(next), delay);
+  };
+  useEffect(() => { settle('ready', 600); return () => window.clearTimeout(timer.current); }, []);
+
+  const result = useMemo(() => runDocumentSearch(query, filters), [query, filters]);
+
+  const submit = (value: string) => { setDraft(value); setQuery(value); setSavedId(null); settle('ready'); };
+  const applyFilters = (next: DocFilters) => { setFilters(next); setSavedId(null); settle('ready', 300); };
+  const clearAll = () => { setDraft(''); setQuery(''); setFilters(NO_FILTERS); setSavedId(null); settle('ready', 300); setAnnouncement('All filters and search cleared'); };
+  const openSaved = (saved: SavedSearch) => {
+    setDraft(saved.query); setQuery(saved.query); setFilters(saved.filters); setSavedId(saved.id);
+    settle(saved.simulateError ? 'error' : 'ready');
+    setAnnouncement(`Opened saved search ${saved.name}`);
+  };
+  const toggle = <K extends keyof DocFilters>(key: K, value: DocFilters[K][number]) =>
+    setPendingFilters((current) => {
+      const list = current[key] as unknown[];
+      return { ...current, [key]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] } as DocFilters;
+    });
+  const removeFilter = <K extends keyof DocFilters>(key: K, value: DocFilters[K][number]) =>
+    applyFilters({ ...filters, [key]: (filters[key] as unknown[]).filter((v) => v !== value) } as DocFilters);
+
+  const saved = SAVED_SEARCHES.find((s) => s.id === savedId);
+  const hasCriteria = query.trim() !== '' || filterCount(filters) > 0;
+
+  const columns: DataTableColumn<ClauseDocument>[] = [
+    {
+      key: 'fileName', header: 'Document', sortable: true, width: '300px',
+      cell: (row) => (
+        <div className={dataTableStyles.cellContent} style={{ minWidth: 0 }}>
+          <Text size="sm" weight="semibold" style={{ overflowWrap: 'anywhere' }}>{row.fileName}</Text>
+          <span className={dataTableStyles.cellSecondary}>{row.agreementType}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'people', header: 'People', width: '190px',
+      cell: (row) => (
+        <Stack gap="small" align="start">
+          {row.personIds.map((id) => {
+            const person = PEOPLE_DATA.find((p) => p.id === id);
+            if (!person) return null;
+            return (
+              <Link key={id} kind="subtle" size="small" href={`#person-${id}`} onClick={(event: React.MouseEvent) => { event.preventDefault(); event.stopPropagation(); setPersonId(id); }}>
+                {person.name}
+              </Link>
+            );
+          })}
+        </Stack>
+      ),
+    },
+    {
+      key: 'status', header: 'Status', sortable: true, width: '150px',
+      cell: (row) => (
+        <div className={dataTableStyles.statusCell}>
+          <span className={dataTableStyles.statusDot} data-status={row.status === 'Expired' ? 'inactive' : 'active'} />
+          <div className={dataTableStyles.statusText}>
+            <span className={dataTableStyles.statusLabel}>{row.status}</span>
+            <span className={dataTableStyles.statusDate}>{row.statusDate}</span>
+          </div>
+        </div>
+      ),
+    },
+    { key: 'found', header: 'Clause found', width: '210px', cell: (row) => <ClauseList clauses={row.found} kind="found" /> },
+    { key: 'notFound', header: 'Clause not found', width: '210px', cell: (row) => <ClauseList clauses={row.notFound} kind="notFound" /> },
+  ];
+
+  const submitOnEnter = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && (event.target as HTMLElement).tagName === 'INPUT') submit(draft);
+  };
+
+  const filterBar = (
+    <div onKeyDown={submitOnEnter} style={{ width: '100%' }}>
+    <FilterBar
+      search={{ value: draft, onChange: setDraft, placeholder: "Try 'employment agreements missing a non-compete clause'" }}
+      showSearchIndicator
+      rightAlignFilters
+      quickActions={[
+        <Dropdown
+          key="saved"
+          position="bottom"
+          align="end"
+          header="Saved searches"
+          items={[
+            ...SAVED_SEARCHES.map((s) => ({ label: s.name, description: s.description, icon: <Icon name="bookmark" size={18} />, selected: s.id === savedId, onClick: () => openSaved(s) })),
+            { divider: true },
+            { label: 'Clear saved search', disabled: !savedId, onClick: clearAll },
+          ]}
+        >
+          <IconButton icon="bookmark" variant="secondary" size="small" aria-label={saved ? `Saved searches, ${saved.name} applied` : 'Saved searches'} />
+        </Dropdown>,
+        <Button key="filters" kind="secondary" size="small" startElement={<Icon name="filter" size={14} />} onClick={() => { setPendingFilters(filters); setFiltersOpen(true); }}>
+          {filterCount(filters) ? `All Filters (${filterCount(filters)})` : 'All Filters'}
+        </Button>,
+      ]}
+      filters={
+        <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
+          {hasCriteria && <Button kind="tertiary" size="small" onClick={clearAll}>Clear all</Button>}
+          <Button kind="primary" size="small" onClick={onAskIris} startElement={<IrisIconInverse size={20} />} className="iris-ask-button">Ask Iris</Button>
+        </Inline>
+      }
+    />
+    </div>
+  );
+
+  const appliedChips = [
+    ...(saved ? [<Chip key="saved" onRemove={clearAll}>{`Saved search: ${saved.name}`}</Chip>] : []),
+    ...filters.status.map((v) => <Chip key={`s-${v}`} onRemove={() => removeFilter('status', v)}>{`Status: ${v}`}</Chip>),
+    ...filters.type.map((v) => <Chip key={`t-${v}`} onRemove={() => removeFilter('type', v)}>{`Type: ${v}`}</Chip>),
+    ...filters.found.map((v) => <Chip key={`f-${v}`} onRemove={() => removeFilter('found', v)}>{`Clause found: ${v}`}</Chip>),
+    ...filters.notFound.map((v) => <Chip key={`n-${v}`} onRemove={() => removeFilter('notFound', v)}>{`Clause not found: ${v}`}</Chip>),
+  ];
+
+  const checkboxGroup = <K extends keyof DocFilters>(title: string, key: K, options: DocFilters[K]) => (
+    <fieldset className="docs-filter-group">
+      <legend><Text size="sm" weight="semibold">{title}</Text></legend>
+      <Stack gap="small">
+        {(options as string[]).map((option) => (
+          <Checkbox key={option} label={option} checked={(pendingFilters[key] as string[]).includes(option)} onChange={() => toggle(key, option as DocFilters[K][number])} />
+        ))}
+      </Stack>
+    </fieldset>
+  );
+
+  let body: React.ReactNode;
+  if (phase === 'loading') {
+    body = (
+      <Stack gap="medium" style={{ padding: 'var(--ink-spacing-300)' }} role="status" aria-live="polite" aria-label="Loading documents">
+        {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={56} />)}
+      </Stack>
+    );
+  } else if (phase === 'error') {
+    body = (
+      <Stack gap="medium" style={{ padding: 'var(--ink-spacing-300)' }}>
+        <Alert kind="danger" title="We couldn't run this search">
+          The compliance index didn&apos;t respond. Your documents are unaffected.
+        </Alert>
+        <Inline gap="small">
+          <Button kind="primary" size="small" onClick={() => { if (saved) openSaved({ ...saved, simulateError: false }); else settle('ready'); }}>Try again</Button>
+          <Button kind="secondary" size="small" onClick={clearAll}>Clear search</Button>
+        </Inline>
+      </Stack>
+    );
+  } else if (CLAUSE_DOCUMENTS.length === 0) {
+    body = <EmptyState header={<EmptyState.Header text="No completed documents yet" />} callToAction={<Button kind="primary">Upload documents</Button>}>Completed documents appear here once Iris has analyzed their clauses.</EmptyState>;
+  } else if (result.rows.length === 0) {
+    body = (
+      <EmptyState header={<EmptyState.Header text="No documents match" />} callToAction={<Button kind="secondary" onClick={clearAll}>Clear all</Button>}>
+        Try different words, remove a filter, or ask Iris to help refine this search.
+      </EmptyState>
+    );
+  } else {
+    body = (
+      <DataTable bordered columns={columns} data={result.rows} getRowKey={(row) => row.id} selectable stickyHeader showColumnControl rowHeight="tall" emptyMessage="No documents match"
+        onRowClick={() => {}} pagination={{ page: 1, pageSize: 25, totalItems: result.rows.length, onPageChange: () => {}, onPageSizeChange: () => {}, showInfo: true }} />
+    );
+  }
+
+  const person = PEOPLE_DATA.find((p) => p.id === personId);
+  const personDocs = CLAUSE_DOCUMENTS.filter((d) => personId && d.personIds.includes(personId));
+
+  const content = (
+    <div>
+      <div className="sr-only" role="status" aria-live="polite">{phase === 'ready' ? `${result.rows.length} documents shown. ${announcement}` : ''}</div>
+      {phase === 'ready' && (result.chips.length > 0 || appliedChips.length > 0) && (
+        <Inline gap="small" align="center" style={{ flexWrap: 'wrap', padding: 'var(--ink-spacing-150) var(--ink-spacing-300)' }}>
+          {result.chips.length > 0 && <Inline gap="small" align="center"><AIBadge infoContent={false} /><Text size="sm" color="secondary">Iris understood:</Text></Inline>}
+          {result.chips.map((chip) => <Chip key={chip}>{chip}</Chip>)}
+          {appliedChips}
+        </Inline>
+      )}
+      {body}
+      <Drawer open={filtersOpen} onClose={() => setFiltersOpen(false)} title="All filters" size="medium"
+        footer={
+          <Inline gap="small" justify="end" style={{ width: '100%', paddingRight: 'var(--ink-spacing-800, 64px)' }}>
+            <Button kind="tertiary" onClick={() => setPendingFilters(NO_FILTERS)}>Clear all</Button>
+            <Button kind="secondary" onClick={() => setFiltersOpen(false)}>Cancel</Button>
+            <Button kind="primary" onClick={() => { applyFilters(pendingFilters); setFiltersOpen(false); }}>Apply filters</Button>
+          </Inline>
+        }>
+        <Stack gap="large">
+          {checkboxGroup('Status', 'status', DOC_STATUSES)}
+          {checkboxGroup('Agreement type', 'type', DOC_TYPES)}
+          {checkboxGroup('Clause found', 'found', [...CLAUSES])}
+          {checkboxGroup('Clause not found', 'notFound', [...CLAUSES])}
+        </Stack>
+      </Drawer>
+      <Drawer open={!!person} onClose={() => setPersonId(null)} title={person?.name ?? 'Person'} size="medium">
+        {person && (
+          <Stack gap="large">
+            <Inline gap="small" align="center">
+              <Avatar size="large" initials={initialsOf(person.name)} />
+              <Stack gap="none">
+                <Text weight="semibold">{person.name}</Text>
+                <Text size="sm" color="secondary">{[person.status, person.employmentType].filter(Boolean).join(' · ') || '--'}</Text>
+              </Stack>
+            </Inline>
+            <Stack gap="small">
+              <Text size="sm" color="secondary">{`Employee ID: ${person.employeeId || person.applicantId || '--'}`}</Text>
+              <Text size="sm" color="secondary">{`Location: ${person.location || '--'}`}</Text>
+              <Text size="sm" color="secondary">{`Email: ${person.emails.join(', ') || '--'}`}</Text>
+              <Text size="sm" color="secondary">{`Hire date: ${person.hireDate || '--'}`}</Text>
+            </Stack>
+            <Stack gap="small">
+              <Heading level={3}>{`Documents (${personDocs.length})`}</Heading>
+              {personDocs.map((doc) => (
+                <Card key={doc.id} radius="large"><Card.Body>
+                  <Stack gap="small">
+                    <Text size="sm" weight="semibold">{doc.fileName}</Text>
+                    <Text size="sm" color="secondary">{`${doc.found.length} clauses found · ${doc.notFound.length} not found`}</Text>
+                  </Stack>
+                </Card.Body></Card>
+              ))}
+            </Stack>
+          </Stack>
+        )}
+      </Drawer>
+    </div>
+  );
+
+  return { filterBar, content };
+}
+
 /* ═══════════════════════════════════════════════════════════
    Parties — Organizations and People
    ═══════════════════════════════════════════════════════════ */
@@ -1518,7 +1877,7 @@ const workspaceColumns: DataTableColumn<Workspace>[] = [
 
 /* ═══════════════════════════════════════
    Templates Data (matches real DocuSign)
-   ═════════════════��══════════════��══════ */
+   ═════════════════��═════════════����══════ */
 
 interface TemplateItem {
   id: string;
@@ -2513,7 +2872,7 @@ function InsightsPage({ view, onNavigate, reports, onReportsChange, creator, onC
    (rendered inline via AgreementTableView)
    ═══════════════════════════════════════ */
 
-/* ═══════════════════════════════════════
+/* ═════════���═════════════════════════════
    Automations and Admin
    ═══════════════════════════════════════ */
 
@@ -4683,6 +5042,7 @@ function PrototypeApp() {
   const [insightReports, setInsightReports] = useState<ReportItem[]>(REPORTS_DATA);
   const [insightCreator, setInsightCreator] = useState<'report' | 'dashboard' | null>(null);
   const [search, setSearch] = useState('');
+  const [completedMode, setCompletedMode] = useState<'documents' | 'envelopes'>('documents');
   const [agreementDateFilter, setAgreementDateFilter] = useState(true);
   const [showAgreementDetail, setShowAgreementDetail] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
@@ -5128,7 +5488,9 @@ function PrototypeApp() {
   };
 
   const isPartiesView = sidebarView.startsWith('parties');
-  const isNavigatorView = sidebarView === 'completed';
+  const isCompletedView = sidebarView === 'completed';
+  const isNavigatorView = isCompletedView && completedMode === 'documents';
+  const completedDocs = useCompletedDocuments(openIris);
   const isRequestsView = sidebarView === 'requests';
   const isWorkspacesView = sidebarView === 'workspaces';
   const isPowerFormsView = sidebarView === 'powerforms';
@@ -5210,7 +5572,7 @@ function PrototypeApp() {
         </Banner>
       ) : undefined}
       pageHeader={
-        isNavigatorView ? (
+        isCompletedView ? (
           <Inline align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
             <Inline gap="medium" align="center">
               <Heading level={1} style={{ fontSize: 'var(--ink-font-heading-m-size)', fontWeight: 'var(--ink-font-weight-regular)', color: 'var(--ink-font-default)', margin: 0 }}>
@@ -5220,13 +5582,13 @@ function PrototypeApp() {
                 position="bottom"
                 align="start"
                 items={[
-                  { label: 'Documents', description: 'Analyze agreement data with AI', icon: <Icon name="document" size={18} />, selected: true },
-                  { label: 'Envelopes', description: 'View signatures and activity', icon: <Icon name="envelope" size={18} /> },
+                  { label: 'Documents', description: 'Analyze agreement data with AI', icon: <Icon name="document" size={18} />, selected: isNavigatorView, onClick: () => { setCompletedMode('documents'); setSearch(''); } },
+                  { label: 'Envelopes', description: 'View signatures and activity', icon: <Icon name="envelope" size={18} />, selected: !isNavigatorView, onClick: () => { setCompletedMode('envelopes'); setSearch(''); } },
                 ]}
               >
-                <Button kind="tertiary" size="large" menuTrigger accessibilityText="Select a view" className="navigator-view-trigger">Documents</Button>
+                <Button kind="tertiary" size="large" menuTrigger accessibilityText="Select a view" className="navigator-view-trigger">{isNavigatorView ? 'Documents' : 'Envelopes'}</Button>
               </Dropdown>
-              <AIBadge infoContent={false} style={{ marginLeft: "var(--ink-spacing-50)", flexShrink: 0 }} />
+              {isNavigatorView && <AIBadge infoContent={false} style={{ marginLeft: "var(--ink-spacing-50)", flexShrink: 0 }} />}
             </Inline>
             <Inline gap="small" align="center">
               <ComboButton variant="secondary" size="small" startIcon="plus" compact accessibilityText="Add documents" dropdownLabel="More add document options" />
@@ -5246,7 +5608,7 @@ function PrototypeApp() {
         />
         )
       }
-      filterBar={
+      filterBar={isNavigatorView ? completedDocs.filterBar :
         <FilterBar
           className={isEnvelopeListView ? 'agreement-list-filters' : undefined}
           search={{
@@ -5334,7 +5696,7 @@ function PrototypeApp() {
           </Stack>
         </Inline>
       ) : isNavigatorView ? (
-        <DataTable bordered columns={navigatorColumns} data={filteredNavigator} getRowKey={(row) => row.id} selectable stickyHeader stickyFooter showColumnControl rowHeight="tall" emptyMessage="No completed documents" onRowClick={() => setShowAgreementDetail(true)} pagination={{ page: 1, pageSize: 25, totalItems: 1659, onPageChange: () => {}, onPageSizeChange: () => {}, showInfo: true }} />
+        completedDocs.content
       ) : (
         <DataTable className="agreement-list-table" columns={getAgreementColumns(row => {
           const draft = createdDrafts.find(item => item.id === row.id);

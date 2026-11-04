@@ -574,3 +574,7 @@ img, svg { display: block; max-width: 100%; }
 .pm-layout:has(.pm-preview) .pm-main { padding-inline: var(--ink-spacing-400); }
 .pm-layout:has(.pm-preview) .pm-row { grid-template-columns: minmax(104px, 0.5fr) repeat(var(--pm-cols), minmax(0, 1fr)); }
 .pm-cell[data-diff='true'] [class*='labelText'] { overflow-wrap: normal; word-break: normal; }
+
+.docs-filter-group { border: 0; margin: 0; padding: 0; min-width: 0; }
+.docs-filter-group legend { padding: 0 0 var(--ink-spacing-100); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
