@@ -253,7 +253,7 @@ type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | '
 type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'template-gallery' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ════════════════════════��══════════════
+/* ════════════════════════���══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -511,11 +511,15 @@ interface Organization {
 interface Person {
   id: string;
   name: string;
-  email: string;
-  organization: string;
-  title: string;
-  side: PartySide;
-  activeAgreements: number;
+  employeeId: string;
+  applicantId: string;
+  employmentType: string;
+  status: string;
+  location: string;
+  emails: string[];
+  phone: string;
+  hireDate: string;
+  verified: boolean;
 }
 
 const ORGANIZATIONS_DATA: Organization[] = [
@@ -536,22 +540,17 @@ const ORGANIZATIONS_DATA: Organization[] = [
 ];
 
 const PEOPLE_DATA: Person[] = [
-  { id: 'p1', name: 'Priya Raman', email: 'priya.raman@acme.example', organization: 'Acme Corporation', title: 'VP, Procurement', side: 'External', activeAgreements: 6 },
-  { id: 'p2', name: 'Priya Ramaswamy', email: 'p.ramaswamy@acme.example', organization: 'Acme Corporation', title: 'Procurement Lead', side: 'External', activeAgreements: 2 },
-  { id: 'p3', name: 'Daniel Okafor', email: 'daniel.okafor@northwind.example', organization: 'Northwind Traders', title: 'Account Director', side: 'External', activeAgreements: 4 },
-  { id: 'p4', name: 'Akshat Mishra', email: 'akshat.mishra@protolab.example', organization: 'Protolab', title: 'Product Designer', side: 'Internal', activeAgreements: 18 },
-  { id: 'p5', name: 'Marta Lindqvist', email: 'marta.lindqvist@protolab.example', organization: 'Protolab EMEA GmbH', title: 'Legal Counsel', side: 'Internal', activeAgreements: 11 },
-  { id: 'p6', name: 'Chen Wei', email: 'chen.wei@contoso.example', organization: 'Contoso Ltd.', title: 'Partnerships Manager', side: 'External', activeAgreements: 3 },
-  { id: 'p7', name: 'Hannah Becker', email: 'hannah.becker@fabrikam.example', organization: 'Fabrikam Industries', title: 'Chief Operating Officer', side: 'External', activeAgreements: 5 },
-  { id: 'p8', name: 'Samuel Adeyemi', email: 'samuel.adeyemi@globex.example', organization: 'Globex Logistics', title: 'Contracts Administrator', side: 'External', activeAgreements: 2 },
-  { id: 'p9', name: 'Lucia Fernandez', email: 'lucia.fernandez@initech.example', organization: 'Initech Systems', title: 'Head of Alliances', side: 'External', activeAgreements: 3 },
-  { id: 'p10', name: 'Tomas Novak', email: 'tomas.novak@protolab.example', organization: 'Protolab EMEA GmbH', title: 'Sales Operations', side: 'Internal', activeAgreements: 9 },
-  { id: 'p11', name: 'Grace Whitfield', email: 'grace.whitfield@umbrella.example', organization: 'Umbrella Health', title: 'Compliance Officer', side: 'External', activeAgreements: 4 },
-  { id: 'p12', name: 'Omar Haddad', email: 'omar.haddad@hooli.example', organization: 'Hooli Cloud', title: 'Enterprise Account Manager', side: 'External', activeAgreements: 7 },
-  { id: 'p13', name: 'Ines Duarte', email: 'ines.duarte@wayne.example', organization: 'Wayne Facilities Group', title: 'Facilities Director', side: 'External', activeAgreements: 5 },
-  { id: 'p14', name: 'Rhea Kapoor', email: 'rhea.kapoor@stark.example', organization: 'Stark Capital Partners', title: 'Investment Associate', side: 'External', activeAgreements: 1 },
-  { id: 'p15', name: 'Jonas Albrecht', email: 'jonas.albrecht@protolab.example', organization: 'Protolab', title: 'Finance Manager', side: 'Internal', activeAgreements: 13 },
-  { id: 'p16', name: 'Keiko Tanaka', email: 'keiko.tanaka@soylent.example', organization: 'Soylent Foods', title: 'Purchasing Manager', side: 'External', activeAgreements: 0 },
+  { id: 'p1', name: 'Blake Hayes', employeeId: '2938476', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['blake.hayes@fontara.com', 'blakeh@gmail.com'], phone: '415-555-0142', hireDate: '3/14/2022', verified: true },
+  { id: 'p2', name: 'Daniel Garcia', employeeId: '0948573', applicantId: '', employmentType: 'Part-time', status: 'Employee', location: 'San Francisco, CA', emails: ['daniel.garcia@fontara.com'], phone: '', hireDate: '9/6/2023', verified: false },
+  { id: 'p3', name: 'David Lambert', employeeId: '3489735', applicantId: '', employmentType: 'Intern', status: 'Intern', location: 'Seattle, WA', emails: ['david.lambert@fontara.com'], phone: '', hireDate: '6/1/2025', verified: false },
+  { id: 'd1', name: 'Dale Simmons', employeeId: '1039475', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['fionalovesapples@gmail.com'], phone: '', hireDate: '2/3/2025', verified: true },
+  { id: 'd2', name: 'Dale Simmons', employeeId: '', applicantId: '654823', employmentType: 'Full-time', status: 'Employee', location: 'San Jose, CA', emails: ['dale.simmons@fontara.com'], phone: '408-456-0937', hireDate: '2/3/2025', verified: true },
+  { id: 'd3', name: 'Dale Simmon', employeeId: '1908235', applicantId: '293847', employmentType: '', status: 'Ex-Employee', location: '', emails: ['f.apple@orchardfarms.com'], phone: '', hireDate: '', verified: false },
+  { id: 'p7', name: 'Harry van Leest', employeeId: '983402', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'Seattle, WA', emails: ['harry.vanleest@fontara.com'], phone: '', hireDate: '1/10/2021', verified: true },
+  { id: 'p8', name: 'John Havering', employeeId: '2374503', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['john.havering@fontara.com'], phone: '', hireDate: '8/22/2020', verified: true },
+  { id: 'p9', name: 'Linda Simon', employeeId: '5347802', applicantId: '', employmentType: 'Fixed term', status: 'Contractor', location: 'Chicago, IL', emails: ['linda.simon@fontara.com'], phone: '', hireDate: '4/4/2024', verified: false },
+  { id: 'p10', name: 'Mary Wilson', employeeId: '2387523', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'Chicago, IL', emails: ['mary.wilson@fontara.com'], phone: '', hireDate: '11/2/2019', verified: true },
+  { id: 'p11', name: 'Michael Berger', employeeId: '5093487', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['michael.berger@fontara.com'], phone: '', hireDate: '5/17/2022', verified: true },
 ];
 
 const initialsOf = (name: string) => name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
@@ -567,21 +566,26 @@ const organizationColumns: DataTableColumn<Organization>[] = [
 
 const personColumns: DataTableColumn<Person>[] = [
   {
-    key: 'name', header: 'Name', sortable: true, width: '28%',
+    key: 'name', header: 'Name', sortable: true, width: '24%',
     cell: (row) => (
-      <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
-        <Avatar size="small" initials={initialsOf(row.name)} />
-        <Stack gap="none">
-          <Text size="sm" weight="semibold">{row.name}</Text>
-          <Text size="xs" color="secondary">{row.email}</Text>
-        </Stack>
+      <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
+        <Text size="sm" weight="semibold">{row.name}</Text>
+        {row.verified && <Icon name="shield-check" size="small" aria-label="Verified" />}
       </Inline>
     ),
   },
-  { key: 'organization', header: 'Organization', sortable: true, cell: (row) => <Text size="sm">{row.organization}</Text> },
-  { key: 'title', header: 'Job title', sortable: true, cell: (row) => <Text size="sm" color="secondary">{row.title}</Text> },
-  { key: 'side', header: 'Party side', sortable: true, cell: (row) => <Badge kind={row.side === 'Internal' ? 'emphasis' : 'subtle'}>{row.side}</Badge> },
-  { key: 'activeAgreements', header: 'Active agreements', sortable: true, cell: (row) => <Text size="sm">{row.activeAgreements}</Text> },
+  { key: 'employeeId', header: 'Employee ID', sortable: true, cell: (row) => <Text size="sm">{row.employeeId || row.applicantId || '--'}</Text> },
+  { key: 'employmentType', header: 'Employment Type', sortable: true, cell: (row) => <Text size="sm">{row.employmentType || '--'}</Text> },
+  { key: 'status', header: 'Status', sortable: true, cell: (row) => <Text size="sm">{row.status || '--'}</Text> },
+  { key: 'location', header: 'Location', sortable: true, cell: (row) => <Text size="sm">{row.location || '--'}</Text> },
+  {
+    key: 'email', header: 'Email',
+    cell: (row) => (
+      <Stack gap="none">
+        {row.emails.map((email) => <Text key={email} size="sm" style={{ overflowWrap: 'anywhere' }}>{email}</Text>)}
+      </Stack>
+    ),
+  },
 ];
 
 const PARTY_FILTER_ALL = 'All';
@@ -598,7 +602,7 @@ function PartyFilterMenu({ label, value, options, onChange }: { label: string; v
   );
 }
 
-type PartyRecord = Organization | Person;
+type PartyRecord = Organization;
 interface MergeField { key: string; label: string; sum?: boolean }
 
 const ORGANIZATION_MERGE_FIELDS: MergeField[] = [
@@ -608,15 +612,6 @@ const ORGANIZATION_MERGE_FIELDS: MergeField[] = [
   { key: 'location', label: 'Location' },
   { key: 'activeAgreements', label: 'Active agreements', sum: true },
   { key: 'totalAgreements', label: 'Total agreements', sum: true },
-];
-
-const PERSON_MERGE_FIELDS: MergeField[] = [
-  { key: 'name', label: 'Name' },
-  { key: 'email', label: 'Email' },
-  { key: 'organization', label: 'Organization' },
-  { key: 'title', label: 'Job title' },
-  { key: 'side', label: 'Party side' },
-  { key: 'activeAgreements', label: 'Active agreements', sum: true },
 ];
 
 const MERGE_MAX_RECORDS = 5;
@@ -656,7 +651,7 @@ function buildMergedRecord(records: PartyRecord[], fields: MergeField[], choices
 }
 
 function MergedPreview({ type, merged, fields, count }: { type: PartiesView; merged: PartyRecord; fields: MergeField[]; count: number }) {
-  const isPerson = type === 'people';
+  const isPerson = false as boolean;
   return (
     <section className="merge-preview" aria-label="Merged record preview" aria-live="polite">
       <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
@@ -688,8 +683,8 @@ function MergeFlow({ type, records, onClose, onMerged }: {
   onClose: () => void;
   onMerged: (merged: PartyRecord, removedIds: string[]) => void;
 }) {
-  const fields = type === 'organizations' ? ORGANIZATION_MERGE_FIELDS : PERSON_MERGE_FIELDS;
-  const noun = type === 'organizations' ? 'organizations' : 'people';
+  const fields = ORGANIZATION_MERGE_FIELDS;
+  const noun = 'organizations';
   const uid = useId();
   const [stage, setStage] = useState<'compare' | 'confirm'>('compare');
   const [choices, setChoices] = useState(() => defaultMergeChoices(records, fields));
@@ -748,7 +743,7 @@ function MergeFlow({ type, records, onClose, onMerged }: {
               {records.map((r) => (
                 <li key={r.id}>
                   <Text size="sm" weight="semibold">{r.name}</Text>
-                  <Text size="xs" color="secondary">{`${'email' in r ? r.email : r.role} · ${r.activeAgreements} active agreements`}</Text>
+                  <Text size="xs" color="secondary">{`${r.role} · ${r.activeAgreements} active agreements`}</Text>
                 </li>
               ))}
             </ul>
@@ -794,7 +789,7 @@ function MergeFlow({ type, records, onClose, onMerged }: {
               {records.map((r) => (
                 <div key={r.id} className="merge-cell merge-head-cell">
                   <Text size="sm" weight="semibold">{r.name}</Text>
-                  <Text size="xs" color="secondary">{'email' in r ? r.email : (r.location || 'No location')}</Text>
+                  <Text size="xs" color="secondary">{r.location || 'No location'}</Text>
                   <Text size="xs" color="secondary">{`${r.activeAgreements} active agreements`}</Text>
                 </div>
               ))}
@@ -862,6 +857,311 @@ function MergeFlow({ type, records, onClose, onMerged }: {
   );
 }
 
+type PersonFieldKey = 'name' | 'applicantId' | 'employeeId' | 'employmentType' | 'status' | 'location';
+
+const PERSON_RADIO_FIELDS: { key: PersonFieldKey; label: string }[] = [
+  { key: 'name', label: 'Display name' },
+  { key: 'applicantId', label: 'Applicant ID' },
+  { key: 'employeeId', label: 'Employee ID' },
+  { key: 'employmentType', label: 'Employment type' },
+  { key: 'status', label: 'Status' },
+  { key: 'location', label: 'Location' },
+];
+
+const emailKey = (id: string, email: string) => `${id}|${email}`;
+
+function PreviewField({ label, value, source, sourceLink, ai }: {
+  label: string;
+  value: string | string[];
+  source?: string;
+  sourceLink?: boolean;
+  ai?: boolean;
+}) {
+  const values = Array.isArray(value) ? value : [value];
+  return (
+    <div className="pm-field">
+      <span className="pm-field-label">{label}</span>
+      <div className="pm-field-row">
+        <div className="pm-field-values">
+          {values.map((v) => (
+            <span key={v} className="pm-field-value">
+              {ai && <Icon name="ai-spark-filled" size="small" className="pm-ai" aria-hidden />}
+              {v}
+            </span>
+          ))}
+        </div>
+        {source && (
+          <span className="pm-field-source">
+            {'Source: '}
+            {sourceLink ? <a href="#source" onClick={(event) => event.preventDefault()}>{source}</a> : source}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DuplicatePartiesOverlay({ records, suggested, onClose, onIgnore, onMerged }: {
+  records: Person[];
+  suggested: boolean;
+  onClose: () => void;
+  onIgnore: () => void;
+  onMerged: (merged: Person, removedIds: string[]) => void;
+}) {
+  const uid = useId();
+  const [included, setIncluded] = useState<Set<string>>(() => new Set(
+    records.filter((r) => !suggested || r.name === records[0].name).map((r) => r.id),
+  ));
+  const [picks, setPicks] = useState<Partial<Record<PersonFieldKey, string>>>({});
+  const [emailsOff, setEmailsOff] = useState<Set<string>>(new Set());
+  const [highlight, setHighlight] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [stage, setStage] = useState<'compare' | 'confirm'>('compare');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  const forceError = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('merge') === 'error';
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const active = useMemo(() => records.filter((r) => included.has(r.id)), [records, included]);
+  const loading = status === 'loading';
+
+  const resolvedId = (key: PersonFieldKey): string | undefined => {
+    const picked = active.find((r) => r.id === picks[key] && r[key]);
+    if (picked) return picked.id;
+    const withValue = active.filter((r) => r[key]);
+    return (key === 'location' ? withValue[withValue.length - 1] : withValue[0])?.id;
+  };
+
+  const differs = (key: PersonFieldKey) => new Set(active.map((r) => r[key])).size > 1;
+  const emailsDiffer = new Set(active.flatMap((r) => r.emails)).size > 1;
+
+  const merged: Person = (() => {
+    const base = active[0] ?? records[0];
+    const pick = (key: PersonFieldKey) => active.find((r) => r.id === resolvedId(key))?.[key] ?? '';
+    return {
+      id: base.id,
+      name: pick('name'),
+      applicantId: pick('applicantId'),
+      employeeId: pick('employeeId'),
+      employmentType: pick('employmentType'),
+      status: pick('status'),
+      location: pick('location'),
+      emails: [...new Set(active.flatMap((r) => r.emails.filter((e) => !emailsOff.has(emailKey(r.id, e)))))],
+      phone: active.find((r) => r.phone)?.phone ?? '',
+      hireDate: active.find((r) => r.hireDate)?.hireDate ?? '',
+      verified: active.some((r) => r.verified),
+    };
+  })();
+
+  const toggleIncluded = (id: string, on: boolean) =>
+    setIncluded((current) => { const next = new Set(current); if (on) next.add(id); else next.delete(id); return next; });
+
+  const toggleEmail = (id: string, email: string, on: boolean) =>
+    setEmailsOff((current) => { const next = new Set(current); const key = emailKey(id, email); if (on) next.delete(key); else next.add(key); return next; });
+
+  const canMerge = active.length >= 2;
+  const requestClose = () => { if (!loading) onClose(); };
+
+  const confirmMerge = () => {
+    setStatus('loading');
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      if (forceError && attempts.current === 1) { setStatus('error'); return; }
+      onMerged(merged, active.filter((r) => r.id !== merged.id).map((r) => r.id));
+    }, 900);
+  };
+
+  if (stage === 'confirm') {
+    return (
+      <Modal
+        open
+        size="medium"
+        title="Confirm merge"
+        onClose={requestClose}
+        closeOnBackdropClick={false}
+        closeOnEscape={!loading}
+        footer={
+          <Inline gap="small" justify="end">
+            <Button kind="tertiary" onClick={() => { setStatus('idle'); setStage('compare'); }} disabled={loading}>Back</Button>
+            <Button kind="secondary" onClick={requestClose} disabled={loading}>Cancel</Button>
+            <Button kind="danger" onClick={confirmMerge} loading={loading}>{status === 'error' ? 'Try again' : 'Confirm merge'}</Button>
+          </Inline>
+        }
+      >
+        <Stack gap="medium">
+          <Banner kind="warning" closable={false}>This merge can&apos;t be undone.</Banner>
+          {status === 'error' && <Banner kind="danger" closable={false}>We couldn&apos;t complete the merge. Try again.</Banner>}
+          <Text size="sm" color="secondary">
+            {`The ${active.length} parties below will be permanently combined into ${merged.name} and can't be separated afterward.${status === 'error' ? ' Nothing was changed.' : ''}`}
+          </Text>
+          <ul className="merge-sources">
+            {active.map((r) => (
+              <li key={r.id}>
+                <Text size="sm" weight="semibold">{r.name}</Text>
+                <Text size="xs" color="secondary">{r.emails.join(', ') || 'No email'}</Text>
+              </li>
+            ))}
+          </ul>
+        </Stack>
+      </Modal>
+    );
+  }
+
+  const gridStyle = { ['--pm-cols' as string]: records.length } as CSSProperties;
+  const mergeLabel = `Merge ${active.length} ${active.length === 1 ? 'Party' : 'Parties'}`;
+
+  const radioRow = (field: typeof PERSON_RADIO_FIELDS[number]) => {
+    const groupId = `${uid}-${field.key}`;
+    const chosen = resolvedId(field.key);
+    const diff = highlight && differs(field.key);
+    return (
+      <div key={field.key} className="pm-row" role="radiogroup" aria-labelledby={`${groupId}-label`}>
+        <span id={`${groupId}-label`} className="pm-label" data-strong={field.key === 'name' ? 'true' : undefined}>{field.label}</span>
+        {records.map((r) => {
+          const off = !included.has(r.id);
+          const value = r[field.key];
+          return (
+            <div key={r.id} className="pm-cell" data-off={off ? 'true' : undefined} data-diff={diff && value ? 'true' : undefined}>
+              {value ? (
+                <Radio
+                  name={groupId}
+                  label={value}
+                  aria-label={`${value}, from ${r.name}`}
+                  checked={!off && chosen === r.id}
+                  disabled={off}
+                  onChange={() => setPicks((current) => ({ ...current, [field.key]: r.id }))}
+                />
+              ) : (
+                <Text size="sm" color="secondary">--</Text>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <Modal
+      open
+      size="xlarge"
+      className="merge-overlay"
+      title="Review duplicate parties"
+      onClose={requestClose}
+      footer={
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" onClick={onIgnore}>Ignore</Button>
+          <Button kind="primary" disabled={!canMerge} onClick={() => setStage('confirm')}>{mergeLabel}</Button>
+        </Inline>
+      }
+    >
+      <div className="pm-layout">
+        <div className="pm-main">
+          <div className="pm-intro">
+            <Stack gap="small">
+              <Heading level={3}>Select people to merge</Heading>
+              <Text color="secondary">Choose data from the listed fields to merge into one record</Text>
+            </Stack>
+            <Inline gap="medium" align="center" style={{ flexWrap: 'nowrap' }}>
+              <Switch label="Highlight differences" checked={highlight} onChange={setHighlight} />
+              {!showPreview && (
+                <Button kind="secondary" size="small" startElement={<Icon name="eye" size="small" />} onClick={() => setShowPreview(true)}>Preview</Button>
+              )}
+            </Inline>
+          </div>
+
+          <div className="pm-card pm-top" style={gridStyle}>
+            <div className="pm-row">
+              <span className="pm-label" data-strong="true">Contact</span>
+              {records.map((r) => (
+                <div key={r.id} className="pm-cell pm-link">
+                  <Checkbox
+                    label={r.name}
+                    checked={included.has(r.id)}
+                    onChange={(event: React.ChangeEvent<HTMLInputElement>) => toggleIncluded(r.id, event.target.checked)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pm-card" style={gridStyle}>
+            {radioRow(PERSON_RADIO_FIELDS[0])}
+            <div className="pm-row" role="group" aria-labelledby={`${uid}-contact-label`}>
+              <span id={`${uid}-contact-label`} className="pm-label" data-strong="true">Contact</span>
+              {records.map((r) => {
+                const off = !included.has(r.id);
+                return (
+                  <div key={r.id} className="pm-cell pm-stack" data-off={off ? 'true' : undefined} data-diff={highlight && emailsDiffer ? 'true' : undefined}>
+                    {r.emails.map((email) => (
+                      <Checkbox
+                        key={email}
+                        label={email}
+                        checked={!off && !emailsOff.has(emailKey(r.id, email))}
+                        disabled={off}
+                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => toggleEmail(r.id, email, event.target.checked)}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            {PERSON_RADIO_FIELDS.slice(1).map(radioRow)}
+          </div>
+        </div>
+
+        {showPreview && (
+          <aside className="pm-preview" aria-label="Merged record preview">
+            <div className="pm-preview-scroll">
+              <div className="pm-preview-top">
+                <PreviewField label="Name" value={merged.name || '--'} />
+                <Button kind="secondary" size="small" startElement={<Icon name="eye-slash" size="small" />} onClick={() => setShowPreview(false)}>Hide Preview</Button>
+              </div>
+              <PreviewField label="Party type" value="Individual" ai />
+              <Accordion
+                allowMultiple
+                defaultOpenItems={['contact', 'employee']}
+                displayLevel="xs"
+                items={[
+                  {
+                    id: 'contact',
+                    title: 'Contact information',
+                    metadata: String((merged.phone ? 1 : 0) + merged.emails.length),
+                    content: (
+                      <Stack gap="medium">
+                        {merged.phone && <PreviewField label="Phone" value={merged.phone} />}
+                        <PreviewField label="Email" value={merged.emails.length ? merged.emails : '--'} />
+                      </Stack>
+                    ),
+                  },
+                  {
+                    id: 'employee',
+                    title: 'Employee details',
+                    metadata: '7',
+                    content: (
+                      <Stack gap="medium">
+                        <PreviewField label="Candidate ID" value={merged.applicantId || '--'} source="Greenhouse" />
+                        <PreviewField label="Employee ID" value={merged.employeeId || '--'} source="Workday" />
+                        <PreviewField label="Employment type" value={merged.employmentType || '--'} source="Workday" />
+                        <PreviewField label="Status" value={merged.status || '--'} />
+                        <PreviewField label="Location" value={merged.location || '--'} source="Hiring Agreement Name" sourceLink ai />
+                        <PreviewField label="Hire date" value={merged.hireDate || '--'} source="Hiring Agreement Name" sourceLink ai />
+                        <PreviewField label="Termination date" value="--" />
+                      </Stack>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          </aside>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function PartiesPage(props: PartiesPageProps) {
   return (
     <ToastProvider>
@@ -875,7 +1175,7 @@ interface PartiesPageProps {
   onAskIris: () => void;
   organizationsData: Organization[];
   peopleData: Person[];
-  onMerge: (type: PartiesView, merged: PartyRecord, removedIds: string[]) => void;
+  onMerge: (type: PartiesView, merged: Organization | Person, removedIds: string[]) => void;
 }
 
 function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge }: PartiesPageProps) {
@@ -887,6 +1187,9 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
   const [search, setSearch] = useState('');
   const [filterA, setFilterA] = useState(PARTY_FILTER_ALL);
   const [filterB, setFilterB] = useState(PARTY_FILTER_ALL);
+  const [filterC, setFilterC] = useState(PARTY_FILTER_ALL);
+  const [bannerOpen, setBannerOpen] = useState(true);
+  const [suggestedOpen, setSuggestedOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ column?: string; direction: 'ascending' | 'descending' | null }>({ direction: null });
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -896,7 +1199,10 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
     return () => window.clearTimeout(timer);
   }, []);
 
-  const organizationNames = useMemo(() => [...new Set(peopleData.map((person) => person.organization))].sort(), [peopleData]);
+  const uniqueSorted = (values: string[]) => [...new Set(values.filter(Boolean))].sort();
+  const employmentTypes = useMemo(() => uniqueSorted(peopleData.map((person) => person.employmentType)), [peopleData]);
+  const statusNames = useMemo(() => uniqueSorted(peopleData.map((person) => person.status)), [peopleData]);
+  const locationNames = useMemo(() => uniqueSorted(peopleData.map((person) => person.location)), [peopleData]);
   const roleNames = useMemo(() => [...new Set(organizationsData.map((org) => org.role))].sort(), [organizationsData]);
 
   const organizations = useMemo(() => {
@@ -912,10 +1218,11 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
     if (forceEmpty) return [];
     const q = search.trim().toLowerCase();
     return peopleData.filter((person) =>
-      (filterA === PARTY_FILTER_ALL || person.organization === filterA) &&
-      (filterB === PARTY_FILTER_ALL || person.side === filterB) &&
-      (!q || person.name.toLowerCase().includes(q) || person.email.toLowerCase().includes(q) || person.organization.toLowerCase().includes(q) || person.title.toLowerCase().includes(q)));
-  }, [forceEmpty, search, filterA, filterB, peopleData]);
+      (filterA === PARTY_FILTER_ALL || person.employmentType === filterA) &&
+      (filterB === PARTY_FILTER_ALL || person.status === filterB) &&
+      (filterC === PARTY_FILTER_ALL || person.location === filterC) &&
+      (!q || person.name.toLowerCase().includes(q) || person.emails.some((email) => email.toLowerCase().includes(q)) || person.employeeId.includes(q) || person.location.toLowerCase().includes(q)));
+  }, [forceEmpty, search, filterA, filterB, filterC, peopleData]);
 
   const visibleIds = useMemo(() => new Set<string | number>((isOrganizations ? organizations : people).map((row) => row.id)), [isOrganizations, organizations, people]);
 
@@ -927,26 +1234,26 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
     });
   }, [visibleIds]);
 
-  const filtersActive = Boolean(search) || filterA !== PARTY_FILTER_ALL || filterB !== PARTY_FILTER_ALL;
-  const clearAll = () => { setSearch(''); setFilterA(PARTY_FILTER_ALL); setFilterB(PARTY_FILTER_ALL); };
+  const filtersActive = Boolean(search) || filterA !== PARTY_FILTER_ALL || filterB !== PARTY_FILTER_ALL || filterC !== PARTY_FILTER_ALL;
+  const clearAll = () => { setSearch(''); setFilterA(PARTY_FILTER_ALL); setFilterB(PARTY_FILTER_ALL); setFilterC(PARTY_FILTER_ALL); };
   const noun = isOrganizations ? 'organizations' : 'people';
   const rowCount = isOrganizations ? organizations.length : people.length;
 
-  const selectedRecords = useMemo<PartyRecord[]>(
-    () => (isOrganizations ? organizations : people).filter((row) => selected.has(row.id)),
-    [isOrganizations, organizations, people, selected],
-  );
-  const mixedSides = new Set(selectedRecords.map((record) => record.side)).size > 1;
+  const selectedOrganizations = useMemo(() => organizations.filter((row) => selected.has(row.id)), [organizations, selected]);
+  const selectedPeople = useMemo(() => people.filter((row) => selected.has(row.id)), [people, selected]);
+  const selectedRecords: (Organization | Person)[] = isOrganizations ? selectedOrganizations : selectedPeople;
+  const mixedSides = isOrganizations && new Set(selectedOrganizations.map((record) => record.side)).size > 1;
   const mergeBlocker =
     selectedRecords.length < 2 ? 'Select at least 2 to merge'
     : selectedRecords.length > MERGE_MAX_RECORDS ? `Select up to ${MERGE_MAX_RECORDS} to merge`
     : mixedSides ? "Can't merge internal and external records"
     : '';
 
-  const handleMerged = (merged: PartyRecord, removedIds: string[]) => {
+  const handleMerged = (merged: Organization | Person, removedIds: string[]) => {
     const count = removedIds.length + 1;
     onMerge(view, merged, removedIds);
     setMergeOpen(false);
+    setSuggestedOpen(false);
     setSelected(new Set());
     toast({ kind: 'success', children: `Merged ${count} ${noun} into ${merged.name}.` });
   };
@@ -994,22 +1301,27 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
               </>
             }
           />
-          <Text size="sm" color="secondary">
-            {isOrganizations
-              ? 'Companies you have agreements with, including your own entities.'
-              : 'Individuals who sign, approve or are named across your agreements.'}
-          </Text>
+          {isOrganizations && <Text size="sm" color="secondary">Companies you have agreements with, including your own entities.</Text>}
+          {!isOrganizations && bannerOpen && (
+            <Banner kind="promo" customIcon={<IrisIcon size={20} />} onClose={() => setBannerOpen(false)}>
+              {'You have '}<strong>48 parties</strong>{' with similar names. We suggest merging these parties for more accurate reporting. '}
+              <Link kind="subtle" href="#review-merge" onClick={(event) => { event.preventDefault(); setSuggestedOpen(true); }}>Review and Merge</Link>
+            </Banner>
+          )}
         </Stack>
       }
       filterBar={
         <FilterBar
-          search={{ value: search, onChange: setSearch, placeholder: isOrganizations ? 'Search organizations...' : 'Search people...' }}
+          search={{ value: search, onChange: setSearch, placeholder: isOrganizations ? 'Search organizations...' : 'Search Employees' }}
           filters={
             <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
               {isOrganizations
                 ? <PartyFilterMenu label="Role" value={filterA} options={roleNames} onChange={setFilterA} />
-                : <PartyFilterMenu label="Organization" value={filterA} options={organizationNames} onChange={setFilterA} />}
-              <PartyFilterMenu label="Party side" value={filterB} options={['Internal', 'External']} onChange={setFilterB} />
+                : <PartyFilterMenu label="Employment Type" value={filterA} options={employmentTypes} onChange={setFilterA} />}
+              {isOrganizations
+                ? <PartyFilterMenu label="Party side" value={filterB} options={['Internal', 'External']} onChange={setFilterB} />
+                : <PartyFilterMenu label="Status" value={filterB} options={statusNames} onChange={setFilterB} />}
+              {!isOrganizations && <PartyFilterMenu label="Location" value={filterC} options={locationNames} onChange={setFilterC} />}
               {filtersActive && <Button kind="tertiary" size="small" onClick={clearAll}>Clear all</Button>}
             </Inline>
           }
@@ -1030,8 +1342,26 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
       ) : (
         <DataTable {...tableProps} columns={personColumns} data={people} getRowKey={(row) => row.id} />
       )}
-      {mergeOpen && !mergeBlocker && (
-        <MergeFlow type={view} records={selectedRecords} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />
+      {isOrganizations && mergeOpen && !mergeBlocker && (
+        <MergeFlow type={view} records={selectedOrganizations} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />
+      )}
+      {!isOrganizations && mergeOpen && !mergeBlocker && (
+        <DuplicatePartiesOverlay
+          records={selectedPeople}
+          suggested={false}
+          onClose={() => setMergeOpen(false)}
+          onIgnore={() => { setMergeOpen(false); toast({ kind: 'information', children: 'Marked as not duplicates.' }); }}
+          onMerged={handleMerged}
+        />
+      )}
+      {!isOrganizations && suggestedOpen && (
+        <DuplicatePartiesOverlay
+          records={peopleData.filter((person) => person.name.startsWith('Dale Simmon'))}
+          suggested
+          onClose={() => setSuggestedOpen(false)}
+          onIgnore={() => { setSuggestedOpen(false); setBannerOpen(false); toast({ kind: 'information', children: 'Marked as not duplicates.' }); }}
+          onMerged={handleMerged}
+        />
       )}
     </AgreementTableView>
   );
@@ -4197,7 +4527,7 @@ function RequestDetailView({ request, onClose }: { request: RequestItem; onClose
   );
 }
 
-/* ═══════════════════════════════════════
+/* ═════════════════════════════���══════��══
    Completed → My Insights panel
    Mirrors the production Navigator insights band
    ═══════════════════════════════════════ */
@@ -4336,12 +4666,10 @@ function PrototypeApp() {
   const [organizationsData, setOrganizationsData] = useState<Organization[]>(ORGANIZATIONS_DATA);
   const [peopleData, setPeopleData] = useState<Person[]>(PEOPLE_DATA);
 
-  const mergePartyRecords = (type: PartiesView, merged: PartyRecord, removedIds: string[]) => {
+  const mergePartyRecords = (type: PartiesView, merged: Organization | Person, removedIds: string[]) => {
     if (type === 'organizations') {
       const mergedOrg = merged as Organization;
-      const retiredNames = organizationsData.filter((org) => org.id === merged.id || removedIds.includes(org.id)).map((org) => org.name);
       setOrganizationsData(organizationsData.filter((org) => !removedIds.includes(org.id)).map((org) => (org.id === merged.id ? mergedOrg : org)));
-      setPeopleData((current) => current.map((person) => (retiredNames.includes(person.organization) ? { ...person, organization: mergedOrg.name } : person)));
     } else {
       setPeopleData((current) => current.filter((person) => !removedIds.includes(person.id)).map((person) => (person.id === merged.id ? (merged as Person) : person)));
     }
