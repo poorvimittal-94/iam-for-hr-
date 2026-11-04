@@ -1,0 +1,64 @@
+.wrapper {
+  font-family: var(--ink-font-family);
+}
+
+.tabList {
+  display: flex;
+  gap: 0; /* Tabs should touch - no gap between tabs */
+}
+
+.tab {
+  background: transparent;
+  border: none;
+  padding: var(--ink-spacing-3) 0; /* Figma: 0 horizontal, min-width + centered */
+  font-family: var(--ink-font-family);
+  font-size: var(--ink-font-body-s-size); /* 14px - Figma */
+  font-weight: var(--ink-font-weight-regular); /* 400 - Unselected tabs use regular weight */
+  color: var(--ink-font-color-neutral); /* Unselected tab text color */
+  cursor: pointer;
+  transition: color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity), background-color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity), border-color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity);
+  border-bottom: 2px solid var(--ink-border-color-subtle); /* 2px border, subtle color for unselected */
+  position: relative;
+  min-width: 80px;
+  min-height: 32px;
+}
+
+.tab:hover:not(:disabled) {
+  color: var(--ink-font-color-default);
+  background: var(--ink-item-bg-color-hover-subtle); /* neutral-fade-5 - Figma */
+}
+
+.tab:active:not(:disabled) {
+  background: var(--ink-item-bg-color-active-subtle); /* neutral-fade-10 - Figma pressed */
+}
+
+.tab:focus {
+  outline: 2px solid var(--ink-cobalt-60);
+  outline-offset: -2px;
+  border-radius: var(--ink-radius-sm) var(--ink-radius-sm) 0 0;
+}
+
+.tab.active {
+  color: var(--ink-font-color-default); /* Selected tab text color */
+  font-weight: var(--ink-font-weight-semibold); /* Selected tabs use semibold */
+  border-bottom-color: var(
+    --ink-border-color-emphasis
+  ); /* #130032 - emphasis border for selected */
+}
+
+.tab.disabled {
+  color: var(--ink-font-color-disabled);
+  cursor: not-allowed;
+  border-bottom-color: var(--ink-border-color-subtle);
+}
+
+.panel {
+  padding: var(--ink-spacing-4) 0;
+}
+
+.tab { display: inline-flex; align-items: center; justify-content: center; gap: var(--ink-spacing-100); padding-inline: var(--ink-spacing-200); }
+.fullWidth .tab { flex: 1; min-width: 0; }
+.extended .tabList { border-bottom: var(--ink-border-width-xs) solid var(--ink-border-color-subtle); }
+.extended .tab { margin-bottom: calc(-1 * var(--ink-border-width-xs)); }
+.affordance { display: inline-flex; align-items: center; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

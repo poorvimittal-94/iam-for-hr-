@@ -1,0 +1,19 @@
+/* PageHeader Pattern Styles */
+
+.container {
+  width: 100%;
+}
+
+.titleSection {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-spacing-150); /* 12px gap between title and badge */
+}
+
+.title {
+  font-size: var(--ink-font-heading-m-size); /* 32px */
+  font-weight: var(--ink-font-weight-regular); /* DocuSign uses 400 for page titles */
+  line-height: var(--ink-font-heading-m-line-height); /* 1.25 → 40px line height */
+  color: var(--ink-font-default);
+  margin: 0;
+}

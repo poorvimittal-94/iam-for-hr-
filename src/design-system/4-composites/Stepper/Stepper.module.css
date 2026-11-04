@@ -1,0 +1,251 @@
+/* Ink Design System - Stepper Component Styles */
+/* Ported from [ds-ui] [INK] Progress Stepper (851:8080) + ProgressStepper.Item (523:25136). */
+
+.stepper {
+  display: flex;
+  font-family: var(--ink-font-family);
+}
+
+.stepper.horizontal {
+  flex-direction: row;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.stepper.vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Step Container */
+.step {
+  display: flex;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.horizontal .step {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  justify-content: flex-start;
+}
+
+.vertical .step {
+  flex-direction: row;
+  align-items: center; /* master: column item counter-axis CENTER */
+  text-align: left;
+  gap: var(--ink-spacing-100); /* 8px */
+}
+
+/* Step Indicator — connector, circle, connector */
+.stepIndicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.horizontal .stepIndicator {
+  flex-direction: row;
+  width: 100%;
+  height: 32px;
+  gap: var(--ink-spacing-200); /* 16px */
+  margin-bottom: var(--ink-spacing-100); /* 8px */
+}
+
+.vertical .stepIndicator {
+  flex-direction: column;
+  align-self: stretch;
+  width: 32px;
+  flex-shrink: 0;
+  gap: var(--ink-spacing-100); /* 8px */
+}
+
+/* Step Icon Wrapper — 32px circle */
+.stepIconWrapper {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ink-radius-full);
+  border: var(--ink-border-width-xs) solid transparent;
+  background-color: transparent;
+  font-family: var(--ink-font-family);
+  font-size: var(--ink-font-heading-xxs-size); /* 16px */
+  font-weight: var(--ink-font-weight-medium); /* 500 */
+  line-height: var(--ink-font-heading-xxs-line-height);
+  transition: background-color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity), border-color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity), color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity), transform var(--ink-motion-duration-200) var(--ink-motion-curve-default);
+  flex-shrink: 0;
+}
+
+/* Status Styles */
+.completed .stepIconWrapper {
+  background-color: var(--ink-status-bg-color-past); /* #e9e6fd */
+  color: var(--ink-icon-color-emphasis); /* #130032 */
+}
+
+.active .stepIconWrapper {
+  background-color: var(--ink-status-bg-color-current); /* #4200ca */
+  color: var(--ink-font-color-inverse);
+}
+
+.upcoming .stepIconWrapper {
+  border-color: var(--ink-border-color-subtle); /* #130032 @ 0.10 */
+  color: var(--ink-font-color-primary); /* #130032 @ 0.90 */
+}
+
+.error .stepIconWrapper {
+  background-color: var(--ink-red-90);
+  color: var(--ink-white-100);
+  border-color: var(--ink-red-90);
+}
+
+.disabled .stepIconWrapper {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Icons */
+.stepNumber {
+  line-height: 1;
+}
+
+.checkIcon,
+.errorIcon,
+.customIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+  Connectors. Each step owns the half above/before it and the half below/after
+  it, exactly as the master does — so a step's own status paints its two
+  halves. Traveled halves: both of a completed step, and the leading half of
+  the active one. The end halves stay in the layout when suppressed so every
+  circle keeps its centre.
+*/
+.connector {
+  background-color: var(--ink-bar-track-color-default); /* #130032 @ 0.10 */
+  transition: background-color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity);
+}
+
+.horizontal .connector {
+  flex: 1;
+  height: 2px;
+  min-width: 0;
+}
+
+.vertical .connector {
+  flex: 1;
+  width: 2px;
+  min-height: var(--ink-spacing-100);
+}
+
+.completed .connector,
+.active .connector {
+  background-color: var(--ink-bar-track-color-visited); /* #260559 */
+}
+
+.active .connectorEnd {
+  background-color: var(--ink-bar-track-color-default);
+}
+
+.connectorHidden {
+  visibility: hidden;
+}
+
+/* Step Content */
+.stepContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-spacing-1);
+  min-width: 0;
+}
+
+.horizontal .stepContent {
+  width: 100%;
+  padding: 0 var(--ink-spacing-2);
+}
+
+.vertical .stepContent {
+  flex: 1;
+}
+
+.stepTitle {
+  font-family: var(--ink-font-family);
+  font-size: var(--ink-font-element-label-size); /* 14px */
+  font-weight: var(--ink-font-weight-medium); /* 500 */
+  line-height: var(--ink-font-element-label-line-height); /* 1.4 */
+  color: var(--ink-font-color-secondary); /* #130032 @ 0.70 */
+  transition: color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity);
+}
+
+.active .stepTitle {
+  color: var(--ink-font-color-accent-emphasis); /* #4200ca */
+  font-weight: var(--ink-font-weight-semibold); /* 600 */
+}
+
+.error .stepTitle {
+  color: var(--ink-red-90);
+}
+
+.stepDescription {
+  font-family: var(--ink-font-family);
+  font-size: var(--ink-font-detail-s-size); /* 12px */
+  font-weight: var(--ink-font-weight-regular);
+  line-height: var(--ink-font-detail-s-line-height); /* 1.5 */
+  color: var(--ink-font-color-secondary);
+  transition: color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity);
+}
+
+.upcoming .stepDescription {
+  color: var(--ink-font-color-tertiary);
+}
+
+.error .stepDescription {
+  color: var(--ink-red-70);
+}
+
+/* Clickable Steps */
+.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.clickable:hover .stepIconWrapper {
+  transform: scale(1.05);
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--ink-cobalt-100);
+  outline-offset: 2px;
+  border-radius: var(--ink-radius-md);
+}
+
+.clickable:active .stepIconWrapper {
+  transform: scale(0.95);
+}
+
+.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.disabled:hover .stepIconWrapper {
+  transform: none;
+}
+
+.visited .stepIconWrapper { background: var(--ink-status-bg-color-past); color: var(--ink-icon-color-emphasis); }
+.visited .connector { background: var(--ink-bar-track-color-visited); }
+.compact { display: flex; align-items: center; justify-content: space-between; gap: var(--ink-spacing-200); font-family: var(--ink-font-family); }
+.compactTitle { font-size: var(--ink-font-body-m-size); font-weight: var(--ink-font-weight-medium); color: var(--ink-font-color-default); }
+.progressRing { display: grid; place-items: center; width: var(--ink-spacing-600); height: var(--ink-spacing-600); border-radius: var(--ink-radius-full); background: conic-gradient(var(--ink-bar-track-color-visited) var(--step-progress), var(--ink-bar-track-color-default) 0); flex-shrink: 0; }
+.progressRing > span { display: grid; place-items: center; width: var(--ink-spacing-500); height: var(--ink-spacing-500); border-radius: var(--ink-radius-full); background: var(--ink-bg-color-default); color: var(--ink-font-color-default); font-size: var(--ink-font-detail-s-size); }
+
+.compactTitle, .compact .stepDescription { font-size: var(--ink-font-body-s-size); line-height: var(--ink-font-body-s-line-height); }
+.progressRing { width: var(--ink-spacing-500); height: var(--ink-spacing-500); background: conic-gradient(var(--ink-bar-fill-color-default) var(--step-progress), var(--ink-bar-track-color-default) 0); }
+.progressRing > span { width: var(--ink-spacing-400); height: var(--ink-spacing-400); font-size: var(--ink-font-detail-xs-size); }

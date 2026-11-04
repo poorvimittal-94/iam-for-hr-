@@ -1,0 +1,114 @@
+/* Ink Design System - Link - Exact Figma Specs */
+
+/* Base Link */
+.link {
+  font-family: var(--ink-font-family);
+  font-weight: var(--ink-font-weight-regular); /* 400 */
+  text-decoration: underline;
+  text-decoration-skip-ink: none;
+  text-underline-position: from-font;
+  text-decoration-thickness: auto;
+  cursor: pointer;
+  transition:
+    color var(--ink-motion-duration-200) var(--ink-motion-curve-opacity),
+    text-decoration var(--ink-motion-duration-200) var(--ink-motion-curve-opacity);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ink-spacing-50); /* 4px */
+}
+
+/* Size Variants */
+.size-medium {
+  font-size: var(--ink-font-size-md); /* 16px */
+  line-height: 1.5;
+}
+
+.size-small {
+  font-size: var(--ink-font-size-sm); /* 14px */
+  line-height: 1.4;
+}
+
+/* Extra small - for "View Job" style links (matches DocuSign) */
+.size-xs {
+  font-size: var(--ink-font-size-xs); /* 12px */
+  line-height: 1.4;
+  font-weight: var(--ink-font-weight-medium); /* 500 */
+}
+
+/* Discrete Mode - no underline by default, only on hover/active */
+.discrete {
+  text-decoration: none;
+}
+
+.discrete:hover,
+.discrete:active {
+  text-decoration: underline;
+}
+
+/* Discrete mode height for consistent hit area */
+.discrete.size-medium {
+  height: 40px;
+  align-items: center;
+}
+
+.discrete.size-small {
+  height: 32px;
+  align-items: center;
+}
+
+/* Kind: Default - Cobalt Colors (semantic link tokens, value-equal to primitives) */
+.kind-default {
+  color: var(--ink-font-color-link-default); /* cobalt-100 #4c00fb */
+}
+
+.kind-default:hover {
+  color: var(--ink-font-color-link-hover); /* cobalt-110 #4200ca */
+}
+
+.kind-default:active {
+  color: var(--ink-font-color-link-active); /* cobalt-120 #37039e */
+}
+
+.kind-default:visited {
+  color: var(--ink-font-color-link-visited); /* cobalt-140 #260559 */
+}
+
+/* Kind: Subtle - Figma fontColorLinkSubtle: default 90%, hover 80% (DARKER), active 100%, visited 70%.
+   Semantic tokens now carry the correct Figma values (was raw neutral-fade workaround). */
+.kind-subtle {
+  color: var(--ink-font-color-link-subtle-default); /* neutral-fade-90 */
+}
+
+.kind-subtle:hover {
+  color: var(--ink-font-color-link-subtle-hover); /* neutral-fade-80: 80% ink; lighter than the Standard 90% default */
+}
+
+.kind-subtle:active {
+  color: var(--ink-font-color-link-subtle-active); /* neutral-140 #130032 = 100% per Figma */
+}
+
+.kind-subtle:visited {
+  color: var(--ink-font-color-link-subtle-visited); /* neutral-fade-70 */
+}
+
+/* Disabled State */
+.disabled {
+  color: var(--ink-neutral-fade-20); /* rgba(19,0,50,0.2) */
+  cursor: not-allowed;
+  pointer-events: none;
+  text-decoration: none;
+}
+
+.disabled:hover,
+.disabled:active,
+.disabled:visited {
+  color: var(--ink-neutral-fade-20);
+  text-decoration: none;
+}
+
+/* Focus State */
+.link:focus-visible {
+  outline: 2px solid var(--ink-cobalt-100);
+  outline-offset: 2px;
+  border-radius: var(--ink-radius-size-xs); /* 4px */
+}

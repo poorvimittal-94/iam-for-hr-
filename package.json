@@ -1,0 +1,33 @@
+{
+  "name": "ink-starter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/check-source-shadows.mjs && npm run tokens:check && vite build",
+    "preview": "vite preview",
+    "eval:setup": "npm install --no-save --no-audit --no-fund tsx @anthropic-ai/sdk",
+    "eval:button": "npm run eval:setup && tsx evals/button-skill.eval.ts",
+    "eval:tables": "npm run eval:setup && tsx evals/no-nested-tables.eval.ts",
+    "audit:design-system": "node scripts/design-system-audit.mjs",
+    "test:audit:design-system": "node --test scripts/design-system-audit.test.mjs",
+    "typecheck": "node scripts/check-source-shadows.mjs && tsc --noEmit",
+    "tokens:check": "node scripts/sync-figma-tokens.mjs",
+    "tokens:generate": "node scripts/sync-figma-tokens.mjs --write-source",
+    "test:tokens": "node --test scripts/figma-token-model.test.mjs",
+    "test:source-shadows": "node --test scripts/check-source-shadows.test.mjs"
+  },
+  "dependencies": {
+    "agentation": "^3.0.2",
+    "lucide-react": "^0.487.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react-swc": "^3.10.0",
+    "typescript": "~5.7.0",
+    "vite": "^6.3.0"
+  }
+}

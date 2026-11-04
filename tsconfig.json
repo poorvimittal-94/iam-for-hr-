@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@ink": [
+        "./src/design-system"
+      ],
+      "@ink/*": [
+        "./src/design-system/*"
+      ],
+      "@ai": [
+        "./src/ai-system"
+      ],
+      "@ai/*": [
+        "./src/ai-system/*"
+      ]
+    },
+    "baseUrl": ".",
+    "types": [
+      "vite/client"
+    ],
+    "noEmit": true
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.figma.ts"
+  ]
+}

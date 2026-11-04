@@ -1,0 +1,87 @@
+/**
+ * ai-system motion tokens — panel vocabulary
+ *
+ * The prototype (`protoLab/src/prototypes/iris-panel/`, frozen) hardcoded its
+ * timing at every call site: `250ms cubic-bezier(0.4, 0, 0.2, 1)` for panel
+ * width and host reflow, `300ms` on the same curve for the artifact reveal,
+ * `180ms ease` for the drag-handle affordance. This file names those values
+ * once so a change lands everywhere.
+ *
+ * Scope: this file currently covers only the panel/host-reflow surface
+ * (`usePanelMode` + `PanelShell`). Streaming, chip stagger, and overlay
+ * choreography have their own unresolved vocabularies — see
+ * `projects/iris-system/notes/2026-07-09-diff-extract-backlog.md` §2.4. Add them
+ * here when they are decided, not before.
+ *
+ * Reduced motion is handled at the token layer: the media query below collapses
+ * every duration to a near-zero value. This is deliberate — inline styles cannot
+ * carry a media query, and `usePanelMode().hostStyle` is an inline style. Zeroing
+ * the token is the only way the host page's reflow transition can honor the
+ * user's preference. Components should *also* carry their own explicit
+ * `prefers-reduced-motion` block, so that a consumer who forgets to import this
+ * file still gets correct behavior.
+ */
+
+:root {
+  /* ---------------------------------------------------------------------
+     Durations
+     --------------------------------------------------------------------- */
+
+  /** Panel width, and the host page's `calc(100% - Npx)` reflow that mirrors it. */
+  --ai-motion-duration-panel: 250ms;
+
+  /** Artifact reveal inside a panel — slower, because it is a nested surface. */
+  --ai-motion-duration-artifact: 300ms;
+
+  /** Drag-handle reveal on hover. Fast enough to feel like a pointer response. */
+  --ai-motion-duration-handle: 180ms;
+
+  /**
+   * One revolution of an indeterminate ring. Added 2026-08-19 for
+   * `ProgressReceipt`'s working state — Akshat: "right after you upload we're
+   * showing a random thinking process — that looks weird, maybe we just use the
+   * progress bar box to show we're processing." A second per turn is slow
+   * enough to read as patience rather than urgency.
+   *
+   * Deliberately NOT collapsed under reduced motion: a near-zero duration on a
+   * loop is a strobe, not a stillness. A component that spins must carry its own
+   * `prefers-reduced-motion` block and stop the animation outright.
+   */
+  --ai-motion-duration-spin: 1000ms;
+
+  /**
+   * One pass of the live-work shimmer. Added 2026-08-19 — Akshat, on the
+   * receipt while the agent is running: *"when there is work we can show a
+   * shimmer over the loan progress — literally the same thing"* (the research
+   * card in Claude's chat). Slower than the ring, because a sweep that crosses
+   * a whole box at ring speed reads as a loading bar.
+   *
+   * Deliberately NOT collapsed under reduced motion, for the same reason as
+   * the ring: a component that sweeps carries its own
+   * `prefers-reduced-motion` block and stops outright.
+   */
+  --ai-motion-duration-shimmer: 1800ms;
+
+  /* ---------------------------------------------------------------------
+     Easings
+     --------------------------------------------------------------------- */
+
+  /** Both ends anchored. Width changes, reflow — anything that starts and stops on screen. */
+  --ai-motion-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /** Fast out, long settle. Entrances: content arriving from off-surface. */
+  --ai-motion-easing-decelerate: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /** Slow out, fast finish. Exits: content leaving, where the tail is wasted time. */
+  --ai-motion-easing-accelerate: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    /* Not `0s` — a zero duration suppresses `transitionend`, which some
+       consumers use to sequence work. 0.01ms is imperceptible and still fires. */
+    --ai-motion-duration-panel: 0.01ms;
+    --ai-motion-duration-artifact: 0.01ms;
+    --ai-motion-duration-handle: 0.01ms;
+  }
+}

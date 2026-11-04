@@ -1,0 +1,29 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+
+# Browser-automation debug logs (Playwright MCP) — not source
+.playwright-mcp/
+
+# Local Claude Code config — not shared
+.claude/launch.json
+.claude/settings.json
+
+# Secrets — the evals read ANTHROPIC_API_KEY from the environment.
+.env
+.env.*
+!.env.example
+
+# sync-agent build artifacts (eve)
+sync-agent/.eve/
+sync-agent/.output/
+sync-agent/.vercel/
+
+# Local tier-1 capture harness — session cookies and capture artifacts
+sync-agent/.auth/
+sync-agent/.captures/
+
+# Built plugin
+plugin-dist/
+.github/workflows/

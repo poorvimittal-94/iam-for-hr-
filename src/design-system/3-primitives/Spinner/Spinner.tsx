@@ -1,0 +1,64 @@
+import React from 'react';
+import styles from './Spinner.module.css';
+
+export interface SpinnerProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Size of the spinner */
+  size?: 'small' | 'medium' | 'large';
+  /** Visual style variant */
+  kind?: 'default' | 'subtle';
+  /** Accessible label for screen readers */
+  label?: string;
+  /** Whether to show the label text visibly */
+  showLabel?: boolean;
+}
+
+export const Spinner: React.FC<SpinnerProps> = ({
+  size = 'large',
+  kind = 'default',
+  label = 'Loading...',
+  showLabel = false,
+  className,
+  ...props
+}) => {
+  const spinnerClasses = [
+    styles.spinner,
+    styles[size],
+    styles[kind],
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  // strokeWidth scales in the 50-unit viewBox so rendered stroke = 2/4/8px at 16/40/80
+  const strokeWidth = size === 'small' ? 6.25 : 5;
+  // Center the stroke inside the full Figma bounds (16/40/80px outer diameter).
+  const radius = 25 - strokeWidth / 2;
+
+  return (
+    <div data-ink-component="Spinner" data-ink-prop-size={size} className={`${styles.wrapper} ${styles[size]}`} role="status" {...props}>
+      <svg aria-hidden="true" className={spinnerClasses} viewBox="0 0 50 50">
+        {/* Background circle */}
+        <circle
+          className={styles.circleBackground}
+          cx="25"
+          cy="25"
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+        />
+        {/* Animated foreground circle */}
+        <circle
+          className={styles.circle}
+          cx="25"
+          cy="25"
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+        />
+      </svg>
+      <span className={showLabel ? styles.labelVisible : styles.label}>{label}</span>
+    </div>
+  );
+};
+
+Spinner.displayName = 'Spinner';

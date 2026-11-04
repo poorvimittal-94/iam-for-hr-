@@ -1,0 +1,127 @@
+
+/* Wrapper — inline so it flows with text */
+.wrapper {
+  position: relative;
+  display: inline;
+}
+
+/* Chip — the small numbered badge */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--ink-spacing-50);
+  margin-left: var(--ink-spacing-50);
+  font-size: var(--ink-font-size-xs);
+  font-weight: var(--ink-font-weight-medium);
+  line-height: 1;
+  color: var(--ink-cobalt-100);
+  background: var(--ink-cobalt-10);
+  border: 1px solid var(--ink-cobalt-30);
+  border-radius: 4px;
+  vertical-align: middle;
+  transform: translateY(-2px);
+  transition: all 120ms ease;
+}
+
+/* Button resets */
+.button {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.button:hover .chip {
+  background: var(--ink-cobalt-100);
+  border-color: var(--ink-cobalt-100);
+  color: var(--ink-white-100);
+}
+
+/*
+ * OPEN — this badge's brief is the one showing beside the text.
+ *
+ * Akshat, 2026-09-02: *"it seems like when it's active this should have the
+ * active state!"* Three badges in one sentence open three different briefs, and
+ * all three looked the same. `RunChip` answered the same ruling in a1cab4f.
+ *
+ * Cobalt-30 is the active rung of the ramp the badge already sits on: Ink puts
+ * `--ink-cta-toggle-bg-selected-subtle` at cobalt-10, which is this chip's rest
+ * fill, and its active step at cobalt-30. Cobalt-20 and `--ink-bg-active-subtle`
+ * both sit one step from cobalt-10, which does not separate at 18px. Cobalt-30 is
+ * also the rest border, so the open chip reads solid to its edge.
+ *
+ * One class deep on purpose. `.button:hover .chip` is deeper and still wins, and
+ * that is right here: hover inverts the chip, so it is a stronger state than
+ * open, not a step back down the ramp that would read as the selection lost.
+ */
+.active .chip {
+  background: var(--ink-cobalt-30);
+}
+
+/* ============================================================================
+   Tooltip — fixed positioning via portal
+   ============================================================================ */
+
+.tooltip {
+  position: fixed;
+  max-width: calc(100vw - 32px);
+  padding: var(--ink-spacing-200);
+  background: var(--ink-bg-color-default);
+  border: 1px solid var(--ink-border-color-subtle);
+  border-radius: var(--ink-radius-size-s);
+  box-shadow:
+    0 8px 24px var(--ink-neutral-fade-20),
+    0 2px 8px var(--ink-neutral-fade-10);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 150ms ease,
+    visibility 150ms ease,
+    transform 150ms ease;
+  transform: translateY(-4px);
+  pointer-events: none;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-spacing-100);
+}
+
+.tooltipVisible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.tooltipLabel {
+  display: block;
+  font-size: var(--ink-font-detail-xs-size);
+  font-weight: var(--ink-font-weight-semibold);
+  color: var(--ink-font-color-tertiary);
+  text-transform: uppercase;
+  letter-spacing: var(--ink-letter-spacing-open);
+  line-height: var(--ink-font-detail-xs-line-height);
+}
+
+.tooltipTitle {
+  display: block;
+  font-size: var(--ink-font-body-s-size);
+  font-weight: var(--ink-font-weight-semibold);
+  color: var(--ink-font-color-default);
+  line-height: var(--ink-font-body-s-line-height);
+  letter-spacing: var(--ink-letter-spacing-tight);
+}
+
+.tooltipExcerpt {
+  display: block;
+  font-size: var(--ink-font-detail-s-size);
+  font-weight: var(--ink-font-weight-regular);
+  color: var(--ink-font-color-secondary);
+  line-height: var(--ink-font-detail-s-line-height);
+  margin-top: var(--ink-spacing-50);
+}

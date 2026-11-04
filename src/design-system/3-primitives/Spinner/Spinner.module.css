@@ -1,0 +1,103 @@
+
+.wrapper {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Label gap is size-dependent per Figma: 8/12/16 for small/medium/large */
+.wrapper.small {
+  gap: var(--ink-spacing-100); /* 8px */
+}
+
+.wrapper.medium {
+  gap: var(--ink-spacing-150); /* 12px */
+}
+
+.wrapper.large {
+  gap: var(--ink-spacing-200); /* 16px */
+}
+
+.spinner {
+  animation: rotate 1s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Sizes - From Figma ProgressCircle specs */
+.spinner.small {
+  width: 16px;
+  height: 16px;
+}
+
+.spinner.medium {
+  width: 40px;
+  height: 40px;
+}
+
+.spinner.large {
+  width: 80px;
+  height: 80px;
+}
+
+/* Background circle - static, lighter color */
+.circleBackground {
+  stroke: var(--ink-bar-track-default); /* track — neutral-fade-10 */
+  stroke-linecap: round;
+}
+
+/* Kind variants - From Figma */
+.spinner.default .circle {
+  stroke: var(--ink-bar-fill-default); /* #735aff — matches ProgressBar fill */
+}
+
+.spinner.subtle .circle {
+  stroke: var(--ink-bar-fill-color-subtle); /* neutral-fade-70 */
+}
+
+/* Animated foreground circle */
+.circle {
+  stroke-linecap: round;
+  animation: dash 1.5s var(--ink-motion-curve-opacity) infinite;
+}
+
+/* Visually hidden label for accessibility */
+.label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Visible label */
+.labelVisible {
+  font-family: var(--ink-font-family);
+  font-size: var(--ink-font-body-s-size); /* 14px */
+  font-weight: var(--ink-font-weight-medium); /* 500 */
+  line-height: var(--ink-font-body-s-line-height); /* 1.4 */
+  color: var(--ink-neutral-fade-90);
+}
+
+@keyframes rotate {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dash {
+  0% {
+    stroke-dasharray: 1, 150;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 90, 150;
+    stroke-dashoffset: -35;
+  }
+  100% {
+    stroke-dasharray: 90, 150;
+    stroke-dashoffset: -124;
+  }
+}
