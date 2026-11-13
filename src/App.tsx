@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useId, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import powerFormsEmptyArt from '@/assets/powerforms-empty.svg';
 import {
   DocuSignShell,
@@ -250,10 +251,10 @@ function FadeIn({ children, keyProp: _keyProp }: { children: React.ReactNode; ke
 
 type TabId = 'home' | 'agreements' | 'templates' | 'automations' | 'insights' | 'admin' | 'scenarios' | 'tokens';
 type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | 'deleted' | 'parties' | 'parties-organizations' | 'parties-people' | 'requests' | 'workspaces' | 'powerforms';
-type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'template-gallery' | 'elastic-templates';
+type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ═══════════════════════════════════════
+/* ════════════════════════����══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -491,6 +492,365 @@ const navigatorColumns: DataTableColumn<NavigatorAgreement>[] = [
   },
 ];
 
+/* ═══════════════════════════════════════
+   Completed → Documents (clause analysis)
+   ═══════════════════════════════════════ */
+
+const CLAUSES = ['Confidentiality', 'Governing law', 'Non-compete', 'Termination for convenience', 'Limitation of liability', 'Indemnification', 'Data protection', 'Auto-renewal'] as const;
+type Clause = typeof CLAUSES[number];
+type DocStatus = 'Active' | 'Expired' | 'Effective soon';
+
+interface ClauseDocument {
+  id: string;
+  fileName: string;
+  agreementType: string;
+  personIds: string[];
+  status: DocStatus;
+  statusDate: string;
+  found: Clause[];
+  notFound: Clause[];
+}
+
+const clauseSplit = (found: Clause[]): Pick<ClauseDocument, 'found' | 'notFound'> => ({ found, notFound: CLAUSES.filter((c) => !found.includes(c)) });
+
+const CLAUSE_DOCUMENTS: ClauseDocument[] = [
+  { id: 'cd1', fileName: 'Blake Hayes – Employment Agreement.pdf', agreementType: 'Employment Agreement', personIds: ['p1'], status: 'Active', statusDate: 'Effective 3/14/2022', ...clauseSplit(['Confidentiality', 'Governing law', 'Non-compete', 'Termination for convenience']) },
+  { id: 'cd2', fileName: 'Daniel Garcia – Offer Letter.pdf', agreementType: 'Offer Letter', personIds: ['p2'], status: 'Active', statusDate: 'Effective 9/6/2023', ...clauseSplit(['Confidentiality', 'Governing law']) },
+  { id: 'cd3', fileName: 'David Lambert – Internship Agreement.pdf', agreementType: 'Internship Agreement', personIds: ['p3'], status: 'Active', statusDate: 'Expires 8/29/2026', ...clauseSplit(['Confidentiality', 'Governing law', 'Data protection']) },
+  { id: 'cd4', fileName: 'Dale Simmons – Offer Letter.pdf', agreementType: 'Offer Letter', personIds: ['d1', 'd2'], status: 'Active', statusDate: 'Effective 2/3/2025', ...clauseSplit(['Governing law', 'Termination for convenience']) },
+  { id: 'cd5', fileName: 'Harry van Leest – Employment Agreement.pdf', agreementType: 'Employment Agreement', personIds: ['p7'], status: 'Active', statusDate: 'Effective 1/10/2021', ...clauseSplit(['Confidentiality', 'Governing law', 'Termination for convenience', 'Data protection']) },
+  { id: 'cd6', fileName: 'John Havering – Non-Disclosure Agreement.pdf', agreementType: 'Non-Disclosure Agreement', personIds: ['p8'], status: 'Expired', statusDate: 'Expired 8/22/2025', ...clauseSplit(['Confidentiality', 'Governing law', 'Indemnification']) },
+  { id: 'cd7', fileName: 'Linda Simon – Contractor Agreement.pdf', agreementType: 'Contractor Agreement', personIds: ['p9'], status: 'Active', statusDate: 'Expires 10/20/2026', ...clauseSplit(['Confidentiality', 'Limitation of liability', 'Indemnification', 'Auto-renewal']) },
+  { id: 'cd8', fileName: 'Mary Wilson – Employment Agreement.pdf', agreementType: 'Employment Agreement', personIds: ['p10'], status: 'Active', statusDate: 'Effective 11/2/2019', ...clauseSplit(['Confidentiality', 'Governing law', 'Data protection']) },
+  { id: 'cd9', fileName: 'Michael Berger – Retention Bonus Agreement.pdf', agreementType: 'Retention Agreement', personIds: ['p11'], status: 'Effective soon', statusDate: 'Effective 7/16/2026', ...clauseSplit(['Confidentiality', 'Governing law']) },
+  { id: 'cd10', fileName: 'Blake Hayes – Equity Award Agreement.pdf', agreementType: 'Equity Agreement', personIds: ['p1'], status: 'Active', statusDate: 'Expires 12/31/2026', ...clauseSplit(['Governing law', 'Termination for convenience', 'Limitation of liability']) },
+  { id: 'cd11', fileName: 'Linda Simon – Statement of Work.pdf', agreementType: 'Statement of Work', personIds: ['p9'], status: 'Expired', statusDate: 'Expired 2/19/2026', ...clauseSplit(['Limitation of liability', 'Auto-renewal']) },
+  { id: 'cd12', fileName: 'Mary Wilson – Relocation Agreement.pdf', agreementType: 'Relocation Agreement', personIds: ['p10'], status: 'Active', statusDate: 'Expires 9/30/2026', ...clauseSplit(['Confidentiality', 'Governing law', 'Termination for convenience']) },
+];
+
+const DOC_TYPES = [...new Set(CLAUSE_DOCUMENTS.map((d) => d.agreementType))].sort();
+const DOC_STATUSES: DocStatus[] = ['Active', 'Effective soon', 'Expired'];
+
+interface DocFilters { status: DocStatus[]; type: string[]; found: Clause[]; notFound: Clause[] }
+const NO_FILTERS: DocFilters = { status: [], type: [], found: [], notFound: [] };
+const filterCount = (f: DocFilters) => f.status.length + f.type.length + f.found.length + f.notFound.length;
+
+interface SavedSearch { id: string; name: string; description: string; query: string; filters: DocFilters; simulateError?: boolean }
+const SAVED_SEARCHES: SavedSearch[] = [
+  { id: 'missing-noncompete', name: 'Missing non-compete', description: 'Employment documents without a non-compete clause', query: '', filters: { ...NO_FILTERS, notFound: ['Non-compete'], type: ['Employment Agreement', 'Offer Letter'] } },
+  { id: 'expiring', name: 'Expiring soon', description: 'Agreements that expire in 2026', query: 'expiring', filters: NO_FILTERS },
+  { id: 'flagged', name: 'Flagged by Iris', description: 'Documents Iris marked for legal review', query: 'flagged for legal review', filters: NO_FILTERS },
+  { id: 'unavailable', name: 'Quarterly compliance sweep', description: 'Runs against the compliance index', query: '', filters: NO_FILTERS, simulateError: true },
+];
+
+const clauseKeyword = (clause: Clause) => clause.toLowerCase().split(/[ -]/)[0];
+
+/** Small rule-based reading of a natural-language query; enough to feel like AI search in a prototype. */
+function interpretQuery(raw: string) {
+  const q = raw.toLowerCase().trim();
+  const missing: Clause[] = [];
+  const found: Clause[] = [];
+  let rest = q;
+  CLAUSES.forEach((clause) => {
+    const kw = clauseKeyword(clause);
+    const hit = new RegExp(`(missing|without|lacking|\\bno)\\s+(an?\\s+|the\\s+)?${kw}`).test(q);
+    const has = new RegExp(`(with|has|having|containing|including)\\s+(an?\\s+|the\\s+)?${kw}`).test(q);
+    if (hit) { missing.push(clause); rest = rest.replace(new RegExp(`(missing|without|lacking|\\bno)\\s+(an?\\s+|the\\s+)?${kw}[\\w-]*(\\s+clause)?`), ' '); }
+    else if (has) { found.push(clause); rest = rest.replace(new RegExp(`(with|has|having|containing|including)\\s+(an?\\s+|the\\s+)?${kw}[\\w-]*(\\s+clause)?`), ' '); }
+  });
+  const expiring = /expir/.test(rest);
+  const flagged = /flagged|legal review/.test(rest);
+  const stop = new Set(['which', 'what', 'show', 'me', 'all', 'the', 'of', 'in', 'days', 'agreements', 'documents', 'that', 'are', 'for', 'and', 'with', 'clause', 'expiring', 'expire', 'expires', 'expired', 'flagged', 'legal', 'review', '90', 'soon']);
+  const terms = rest.split(/[^a-z0-9.–-]+/).filter((t) => t.length > 1 && !stop.has(t));
+  return { missing, found, expiring, flagged, terms };
+}
+
+function runDocumentSearch(query: string, filters: DocFilters): { rows: ClauseDocument[]; chips: string[] } {
+  const ai = interpretQuery(query);
+  const chips = [
+    ...ai.missing.map((c) => `Clause not found: ${c}`),
+    ...ai.found.map((c) => `Clause found: ${c}`),
+    ...(ai.expiring ? ['Expiring or expired'] : []),
+    ...(ai.flagged ? ['Flagged for legal review'] : []),
+    ...ai.terms.map((t) => `Text: “${t}”`),
+  ];
+  const rows = CLAUSE_DOCUMENTS.filter((doc) => {
+    const people = doc.personIds.map((id) => PEOPLE_DATA.find((p) => p.id === id)?.name ?? '').join(' ');
+    const haystack = `${doc.fileName} ${doc.agreementType} ${people}`.toLowerCase();
+    if (ai.terms.some((t) => !haystack.includes(t))) return false;
+    if (ai.missing.some((c) => !doc.notFound.includes(c))) return false;
+    if (ai.found.some((c) => !doc.found.includes(c))) return false;
+    if (ai.expiring && !/^Expire/.test(doc.statusDate)) return false;
+    if (ai.flagged) return false;
+    if (filters.status.length && !filters.status.includes(doc.status)) return false;
+    if (filters.type.length && !filters.type.includes(doc.agreementType)) return false;
+    if (filters.found.some((c) => !doc.found.includes(c))) return false;
+    if (filters.notFound.some((c) => !doc.notFound.includes(c))) return false;
+    return true;
+  });
+  return { rows, chips };
+}
+
+type DocsPhase = 'loading' | 'ready' | 'error';
+
+function ClauseList({ clauses, kind }: { clauses: Clause[]; kind: 'found' | 'notFound' }) {
+  if (clauses.length === 0) return <Text size="sm" color="secondary">None</Text>;
+  const shown = clauses.slice(0, 2);
+  const extra = clauses.slice(2);
+  return (
+    <Stack gap="small" align="start">
+      {shown.map((clause) => (
+        <Badge key={clause} kind={kind === 'found' ? 'success' : 'warning'}>
+          {clause}
+        </Badge>
+      ))}
+      {extra.length > 0 && (
+        <Tooltip text={extra.join(', ')} location="above">
+          <Text size="xs" color="secondary">{`+${extra.length} more`}</Text>
+        </Tooltip>
+      )}
+    </Stack>
+  );
+}
+
+function useCompletedDocuments(onAskIris: () => void) {
+  const [draft, setDraft] = useState('');
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<DocFilters>(NO_FILTERS);
+  const [pendingFilters, setPendingFilters] = useState<DocFilters>(NO_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [phase, setPhase] = useState<DocsPhase>('loading');
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const timer = useRef<number | undefined>(undefined);
+
+  const settle = (next: DocsPhase, delay = 450) => {
+    window.clearTimeout(timer.current);
+    setPhase('loading');
+    timer.current = window.setTimeout(() => setPhase(next), delay);
+  };
+  useEffect(() => { settle('ready', 600); return () => window.clearTimeout(timer.current); }, []);
+
+  const result = useMemo(() => runDocumentSearch(query, filters), [query, filters]);
+
+  const submit = (value: string) => { setDraft(value); setQuery(value); setSavedId(null); settle('ready'); };
+  const applyFilters = (next: DocFilters) => { setFilters(next); setSavedId(null); settle('ready', 300); };
+  const clearAll = () => { setDraft(''); setQuery(''); setFilters(NO_FILTERS); setSavedId(null); settle('ready', 300); setAnnouncement('All filters and search cleared'); };
+  const openSaved = (saved: SavedSearch) => {
+    setDraft(saved.query); setQuery(saved.query); setFilters(saved.filters); setSavedId(saved.id);
+    settle(saved.simulateError ? 'error' : 'ready');
+    setAnnouncement(`Opened saved search ${saved.name}`);
+  };
+  const toggle = <K extends keyof DocFilters>(key: K, value: DocFilters[K][number]) =>
+    setPendingFilters((current) => {
+      const list = current[key] as unknown[];
+      return { ...current, [key]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] } as DocFilters;
+    });
+  const removeFilter = <K extends keyof DocFilters>(key: K, value: DocFilters[K][number]) =>
+    applyFilters({ ...filters, [key]: (filters[key] as unknown[]).filter((v) => v !== value) } as DocFilters);
+
+  const saved = SAVED_SEARCHES.find((s) => s.id === savedId);
+  const hasCriteria = query.trim() !== '' || filterCount(filters) > 0;
+
+  const columns: DataTableColumn<ClauseDocument>[] = [
+    {
+      key: 'fileName', header: 'Document', sortable: true, width: '300px',
+      cell: (row) => (
+        <div className={dataTableStyles.cellContent} style={{ minWidth: 0 }}>
+          <Text size="sm" weight="semibold" style={{ overflowWrap: 'anywhere' }}>{row.fileName}</Text>
+          <span className={dataTableStyles.cellSecondary}>{row.agreementType}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'people', header: 'People', width: '190px',
+      cell: (row) => (
+        <Stack gap="small" align="start">
+          {row.personIds.map((id) => {
+            const person = PEOPLE_DATA.find((p) => p.id === id);
+            if (!person) return null;
+            return (
+              <Link key={id} kind="subtle" size="small" href={`#person-${id}`} onClick={(event: React.MouseEvent) => { event.preventDefault(); event.stopPropagation(); setPersonId(id); }}>
+                {person.name}
+              </Link>
+            );
+          })}
+        </Stack>
+      ),
+    },
+    {
+      key: 'status', header: 'Status', sortable: true, width: '150px',
+      cell: (row) => (
+        <div className={dataTableStyles.statusCell}>
+          <span className={dataTableStyles.statusDot} data-status={row.status === 'Expired' ? 'inactive' : 'active'} />
+          <div className={dataTableStyles.statusText}>
+            <span className={dataTableStyles.statusLabel}>{row.status}</span>
+            <span className={dataTableStyles.statusDate}>{row.statusDate}</span>
+          </div>
+        </div>
+      ),
+    },
+    { key: 'found', header: 'Clause found', width: '210px', cell: (row) => <ClauseList clauses={row.found} kind="found" /> },
+    { key: 'notFound', header: 'Clause not found', width: '210px', cell: (row) => <ClauseList clauses={row.notFound} kind="notFound" /> },
+  ];
+
+  const submitOnEnter = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && (event.target as HTMLElement).tagName === 'INPUT') submit(draft);
+  };
+
+  const filterBar = (
+    <div onKeyDown={submitOnEnter} style={{ width: '100%' }}>
+    <FilterBar
+      search={{ value: draft, onChange: setDraft, placeholder: "Try 'employment agreements missing a non-compete clause'" }}
+      showSearchIndicator
+      rightAlignFilters
+      quickActions={[
+        <Dropdown
+          key="saved"
+          position="bottom"
+          align="end"
+          header="Saved searches"
+          items={[
+            ...SAVED_SEARCHES.map((s) => ({ label: s.name, description: s.description, icon: <Icon name="bookmark" size={18} />, selected: s.id === savedId, onClick: () => openSaved(s) })),
+            { divider: true },
+            { label: 'Clear saved search', disabled: !savedId, onClick: clearAll },
+          ]}
+        >
+          <IconButton icon="bookmark" variant="secondary" size="small" aria-label={saved ? `Saved searches, ${saved.name} applied` : 'Saved searches'} />
+        </Dropdown>,
+        <Button key="filters" kind="secondary" size="small" startElement={<Icon name="filter" size={14} />} onClick={() => { setPendingFilters(filters); setFiltersOpen(true); }}>
+          {filterCount(filters) ? `All Filters (${filterCount(filters)})` : 'All Filters'}
+        </Button>,
+      ]}
+      filters={
+        <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
+          {hasCriteria && <Button kind="tertiary" size="small" onClick={clearAll}>Clear all</Button>}
+          <Button kind="primary" size="small" onClick={onAskIris} startElement={<IrisIconInverse size={20} />} className="iris-ask-button">Ask Iris</Button>
+        </Inline>
+      }
+    />
+    </div>
+  );
+
+  const appliedChips = [
+    ...(saved ? [<Chip key="saved" onRemove={clearAll}>{`Saved search: ${saved.name}`}</Chip>] : []),
+    ...filters.status.map((v) => <Chip key={`s-${v}`} onRemove={() => removeFilter('status', v)}>{`Status: ${v}`}</Chip>),
+    ...filters.type.map((v) => <Chip key={`t-${v}`} onRemove={() => removeFilter('type', v)}>{`Type: ${v}`}</Chip>),
+    ...filters.found.map((v) => <Chip key={`f-${v}`} onRemove={() => removeFilter('found', v)}>{`Clause found: ${v}`}</Chip>),
+    ...filters.notFound.map((v) => <Chip key={`n-${v}`} onRemove={() => removeFilter('notFound', v)}>{`Clause not found: ${v}`}</Chip>),
+  ];
+
+  const checkboxGroup = <K extends keyof DocFilters>(title: string, key: K, options: DocFilters[K]) => (
+    <fieldset className="docs-filter-group">
+      <legend><Text size="sm" weight="semibold">{title}</Text></legend>
+      <Stack gap="small">
+        {(options as string[]).map((option) => (
+          <Checkbox key={option} label={option} checked={(pendingFilters[key] as string[]).includes(option)} onChange={() => toggle(key, option as DocFilters[K][number])} />
+        ))}
+      </Stack>
+    </fieldset>
+  );
+
+  let body: React.ReactNode;
+  if (phase === 'loading') {
+    body = (
+      <Stack gap="medium" style={{ padding: 'var(--ink-spacing-300)' }} role="status" aria-live="polite" aria-label="Loading documents">
+        {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={56} />)}
+      </Stack>
+    );
+  } else if (phase === 'error') {
+    body = (
+      <Stack gap="medium" style={{ padding: 'var(--ink-spacing-300)' }}>
+        <Alert kind="danger" title="We couldn't run this search">
+          The compliance index didn&apos;t respond. Your documents are unaffected.
+        </Alert>
+        <Inline gap="small">
+          <Button kind="primary" size="small" onClick={() => { if (saved) openSaved({ ...saved, simulateError: false }); else settle('ready'); }}>Try again</Button>
+          <Button kind="secondary" size="small" onClick={clearAll}>Clear search</Button>
+        </Inline>
+      </Stack>
+    );
+  } else if (CLAUSE_DOCUMENTS.length === 0) {
+    body = <EmptyState header={<EmptyState.Header text="No completed documents yet" />} callToAction={<Button kind="primary">Upload documents</Button>}>Completed documents appear here once Iris has analyzed their clauses.</EmptyState>;
+  } else if (result.rows.length === 0) {
+    body = (
+      <EmptyState header={<EmptyState.Header text="No documents match" />} callToAction={<Button kind="secondary" onClick={clearAll}>Clear all</Button>}>
+        Try different words, remove a filter, or ask Iris to help refine this search.
+      </EmptyState>
+    );
+  } else {
+    body = (
+      <DataTable bordered columns={columns} data={result.rows} getRowKey={(row) => row.id} selectable stickyHeader showColumnControl rowHeight="tall" emptyMessage="No documents match"
+        onRowClick={() => {}} pagination={{ page: 1, pageSize: 25, totalItems: result.rows.length, onPageChange: () => {}, onPageSizeChange: () => {}, showInfo: true }} />
+    );
+  }
+
+  const person = PEOPLE_DATA.find((p) => p.id === personId);
+  const personDocs = CLAUSE_DOCUMENTS.filter((d) => personId && d.personIds.includes(personId));
+
+  const content = (
+    <div>
+      <div className="sr-only" role="status" aria-live="polite">{phase === 'ready' ? `${result.rows.length} documents shown. ${announcement}` : ''}</div>
+      {phase === 'ready' && (result.chips.length > 0 || appliedChips.length > 0) && (
+        <Inline gap="small" align="center" style={{ flexWrap: 'wrap', padding: 'var(--ink-spacing-150) var(--ink-spacing-300)' }}>
+          {result.chips.length > 0 && <Inline gap="small" align="center"><AIBadge infoContent={false} /><Text size="sm" color="secondary">Iris understood:</Text></Inline>}
+          {result.chips.map((chip) => <Chip key={chip}>{chip}</Chip>)}
+          {appliedChips}
+        </Inline>
+      )}
+      {body}
+      <Drawer open={filtersOpen} onClose={() => setFiltersOpen(false)} title="All filters" size="medium"
+        footer={
+          <Inline gap="small" justify="end" style={{ width: '100%', paddingRight: 'var(--ink-spacing-800, 64px)' }}>
+            <Button kind="tertiary" onClick={() => setPendingFilters(NO_FILTERS)}>Clear all</Button>
+            <Button kind="secondary" onClick={() => setFiltersOpen(false)}>Cancel</Button>
+            <Button kind="primary" onClick={() => { applyFilters(pendingFilters); setFiltersOpen(false); }}>Apply filters</Button>
+          </Inline>
+        }>
+        <Stack gap="large">
+          {checkboxGroup('Status', 'status', DOC_STATUSES)}
+          {checkboxGroup('Agreement type', 'type', DOC_TYPES)}
+          {checkboxGroup('Clause found', 'found', [...CLAUSES])}
+          {checkboxGroup('Clause not found', 'notFound', [...CLAUSES])}
+        </Stack>
+      </Drawer>
+      <Drawer open={!!person} onClose={() => setPersonId(null)} title={person?.name ?? 'Person'} size="medium">
+        {person && (
+          <Stack gap="large">
+            <Inline gap="small" align="center">
+              <Avatar size="large" initials={initialsOf(person.name)} />
+              <Stack gap="none">
+                <Text weight="semibold">{person.name}</Text>
+                <Text size="sm" color="secondary">{[person.status, person.employmentType].filter(Boolean).join(' · ') || '--'}</Text>
+              </Stack>
+            </Inline>
+            <Stack gap="small">
+              <Text size="sm" color="secondary">{`Employee ID: ${person.employeeId || person.applicantId || '--'}`}</Text>
+              <Text size="sm" color="secondary">{`Location: ${person.location || '--'}`}</Text>
+              <Text size="sm" color="secondary">{`Email: ${person.emails.join(', ') || '--'}`}</Text>
+              <Text size="sm" color="secondary">{`Hire date: ${person.hireDate || '--'}`}</Text>
+            </Stack>
+            <Stack gap="small">
+              <Heading level={3}>{`Documents (${personDocs.length})`}</Heading>
+              {personDocs.map((doc) => (
+                <Card key={doc.id} radius="large"><Card.Body>
+                  <Stack gap="small">
+                    <Text size="sm" weight="semibold">{doc.fileName}</Text>
+                    <Text size="sm" color="secondary">{`${doc.found.length} clauses found · ${doc.notFound.length} not found`}</Text>
+                  </Stack>
+                </Card.Body></Card>
+              ))}
+            </Stack>
+          </Stack>
+        )}
+      </Drawer>
+    </div>
+  );
+
+  return { filterBar, content };
+}
+
 /* ═══════════════════════════════════════════════════════════
    Parties — Organizations and People
    ═══════════════════════════════════════════════════════════ */
@@ -511,17 +871,21 @@ interface Organization {
 interface Person {
   id: string;
   name: string;
-  email: string;
-  organization: string;
-  title: string;
-  side: PartySide;
-  activeAgreements: number;
+  employeeId: string;
+  applicantId: string;
+  employmentType: string;
+  status: string;
+  location: string;
+  emails: string[];
+  phone: string;
+  hireDate: string;
+  verified: boolean;
 }
 
 const ORGANIZATIONS_DATA: Organization[] = [
   { id: 'org1', name: 'Acme Corporation', role: 'Customer', side: 'External', location: 'San Francisco, US', activeAgreements: 12, totalAgreements: 48 },
   { id: 'org2', name: 'Northwind Traders', role: 'Vendor', side: 'External', location: 'Seattle, US', activeAgreements: 7, totalAgreements: 31 },
-  { id: 'org3', name: 'Northwind Trading Co.', role: 'Vendor', side: 'External', location: 'Seattle, US', activeAgreements: 2, totalAgreements: 6 },
+  { id: 'org3', name: 'Northwind Trading Co.', role: 'Vendor', side: 'External', location: '', activeAgreements: 2, totalAgreements: 6 },
   { id: 'org4', name: 'Protolab', role: 'Company', side: 'Internal', location: 'San Francisco, US', activeAgreements: 41, totalAgreements: 212 },
   { id: 'org5', name: 'Contoso Ltd.', role: 'Partner', side: 'External', location: 'London, UK', activeAgreements: 5, totalAgreements: 19 },
   { id: 'org6', name: 'Fabrikam Industries', role: 'Customer', side: 'External', location: 'Chicago, US', activeAgreements: 9, totalAgreements: 27 },
@@ -536,22 +900,17 @@ const ORGANIZATIONS_DATA: Organization[] = [
 ];
 
 const PEOPLE_DATA: Person[] = [
-  { id: 'p1', name: 'Priya Raman', email: 'priya.raman@acme.example', organization: 'Acme Corporation', title: 'VP, Procurement', side: 'External', activeAgreements: 6 },
-  { id: 'p2', name: 'Priya Ramaswamy', email: 'p.ramaswamy@acme.example', organization: 'Acme Corporation', title: 'Procurement Lead', side: 'External', activeAgreements: 2 },
-  { id: 'p3', name: 'Daniel Okafor', email: 'daniel.okafor@northwind.example', organization: 'Northwind Traders', title: 'Account Director', side: 'External', activeAgreements: 4 },
-  { id: 'p4', name: 'Akshat Mishra', email: 'akshat.mishra@protolab.example', organization: 'Protolab', title: 'Product Designer', side: 'Internal', activeAgreements: 18 },
-  { id: 'p5', name: 'Marta Lindqvist', email: 'marta.lindqvist@protolab.example', organization: 'Protolab EMEA GmbH', title: 'Legal Counsel', side: 'Internal', activeAgreements: 11 },
-  { id: 'p6', name: 'Chen Wei', email: 'chen.wei@contoso.example', organization: 'Contoso Ltd.', title: 'Partnerships Manager', side: 'External', activeAgreements: 3 },
-  { id: 'p7', name: 'Hannah Becker', email: 'hannah.becker@fabrikam.example', organization: 'Fabrikam Industries', title: 'Chief Operating Officer', side: 'External', activeAgreements: 5 },
-  { id: 'p8', name: 'Samuel Adeyemi', email: 'samuel.adeyemi@globex.example', organization: 'Globex Logistics', title: 'Contracts Administrator', side: 'External', activeAgreements: 2 },
-  { id: 'p9', name: 'Lucia Fernandez', email: 'lucia.fernandez@initech.example', organization: 'Initech Systems', title: 'Head of Alliances', side: 'External', activeAgreements: 3 },
-  { id: 'p10', name: 'Tomas Novak', email: 'tomas.novak@protolab.example', organization: 'Protolab EMEA GmbH', title: 'Sales Operations', side: 'Internal', activeAgreements: 9 },
-  { id: 'p11', name: 'Grace Whitfield', email: 'grace.whitfield@umbrella.example', organization: 'Umbrella Health', title: 'Compliance Officer', side: 'External', activeAgreements: 4 },
-  { id: 'p12', name: 'Omar Haddad', email: 'omar.haddad@hooli.example', organization: 'Hooli Cloud', title: 'Enterprise Account Manager', side: 'External', activeAgreements: 7 },
-  { id: 'p13', name: 'Ines Duarte', email: 'ines.duarte@wayne.example', organization: 'Wayne Facilities Group', title: 'Facilities Director', side: 'External', activeAgreements: 5 },
-  { id: 'p14', name: 'Rhea Kapoor', email: 'rhea.kapoor@stark.example', organization: 'Stark Capital Partners', title: 'Investment Associate', side: 'External', activeAgreements: 1 },
-  { id: 'p15', name: 'Jonas Albrecht', email: 'jonas.albrecht@protolab.example', organization: 'Protolab', title: 'Finance Manager', side: 'Internal', activeAgreements: 13 },
-  { id: 'p16', name: 'Keiko Tanaka', email: 'keiko.tanaka@soylent.example', organization: 'Soylent Foods', title: 'Purchasing Manager', side: 'External', activeAgreements: 0 },
+  { id: 'p1', name: 'Blake Hayes', employeeId: '2938476', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['blake.hayes@fontara.com', 'blakeh@gmail.com'], phone: '415-555-0142', hireDate: '3/14/2022', verified: true },
+  { id: 'p2', name: 'Daniel Garcia', employeeId: '0948573', applicantId: '', employmentType: 'Part-time', status: 'Employee', location: 'San Francisco, CA', emails: ['daniel.garcia@fontara.com'], phone: '', hireDate: '9/6/2023', verified: false },
+  { id: 'p3', name: 'David Lambert', employeeId: '3489735', applicantId: '', employmentType: 'Intern', status: 'Intern', location: 'Seattle, WA', emails: ['david.lambert@fontara.com'], phone: '', hireDate: '6/1/2025', verified: false },
+  { id: 'd1', name: 'Dale Simmons', employeeId: '1039475', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['fionalovesapples@gmail.com'], phone: '', hireDate: '2/3/2025', verified: true },
+  { id: 'd2', name: 'Dale Simmons', employeeId: '', applicantId: '654823', employmentType: 'Full-time', status: 'Employee', location: 'San Jose, CA', emails: ['dale.simmons@fontara.com'], phone: '408-456-0937', hireDate: '2/3/2025', verified: true },
+  { id: 'd3', name: 'Dale Simmon', employeeId: '1908235', applicantId: '293847', employmentType: '', status: 'Ex-Employee', location: '', emails: ['f.apple@orchardfarms.com'], phone: '', hireDate: '', verified: false },
+  { id: 'p7', name: 'Harry van Leest', employeeId: '983402', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'Seattle, WA', emails: ['harry.vanleest@fontara.com'], phone: '', hireDate: '1/10/2021', verified: true },
+  { id: 'p8', name: 'John Havering', employeeId: '2374503', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['john.havering@fontara.com'], phone: '', hireDate: '8/22/2020', verified: true },
+  { id: 'p9', name: 'Linda Simon', employeeId: '5347802', applicantId: '', employmentType: 'Fixed term', status: 'Contractor', location: 'Chicago, IL', emails: ['linda.simon@fontara.com'], phone: '', hireDate: '4/4/2024', verified: false },
+  { id: 'p10', name: 'Mary Wilson', employeeId: '2387523', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'Chicago, IL', emails: ['mary.wilson@fontara.com'], phone: '', hireDate: '11/2/2019', verified: true },
+  { id: 'p11', name: 'Michael Berger', employeeId: '5093487', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: 'San Francisco, CA', emails: ['michael.berger@fontara.com'], phone: '', hireDate: '5/17/2022', verified: true },
 ];
 
 const initialsOf = (name: string) => name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
@@ -560,28 +919,33 @@ const organizationColumns: DataTableColumn<Organization>[] = [
   { key: 'name', header: 'Organization', sortable: true, width: '28%', cell: (row) => <Text size="sm" weight="semibold">{row.name}</Text> },
   { key: 'role', header: 'Role', sortable: true, cell: (row) => <Text size="sm">{row.role}</Text> },
   { key: 'side', header: 'Party side', sortable: true, cell: (row) => <Badge kind={row.side === 'Internal' ? 'emphasis' : 'subtle'}>{row.side}</Badge> },
-  { key: 'location', header: 'Location', sortable: true, cell: (row) => <Text size="sm" color="secondary">{row.location}</Text> },
+  { key: 'location', header: 'Location', sortable: true, cell: (row) => <Text size="sm" color="secondary">{row.location || '—'}</Text> },
   { key: 'activeAgreements', header: 'Active agreements', sortable: true, cell: (row) => <Text size="sm">{row.activeAgreements}</Text> },
   { key: 'totalAgreements', header: 'Total agreements', sortable: true, cell: (row) => <Text size="sm">{row.totalAgreements}</Text> },
 ];
 
 const personColumns: DataTableColumn<Person>[] = [
   {
-    key: 'name', header: 'Name', sortable: true, width: '28%',
+    key: 'name', header: 'Name', sortable: true, width: '24%',
     cell: (row) => (
-      <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
-        <Avatar size="small" initials={initialsOf(row.name)} />
-        <Stack gap="none">
-          <Text size="sm" weight="semibold">{row.name}</Text>
-          <Text size="xs" color="secondary">{row.email}</Text>
-        </Stack>
+      <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
+        <Text size="sm" weight="semibold">{row.name}</Text>
+        {row.verified && <Icon name="shield-check" size="small" aria-label="Verified" />}
       </Inline>
     ),
   },
-  { key: 'organization', header: 'Organization', sortable: true, cell: (row) => <Text size="sm">{row.organization}</Text> },
-  { key: 'title', header: 'Job title', sortable: true, cell: (row) => <Text size="sm" color="secondary">{row.title}</Text> },
-  { key: 'side', header: 'Party side', sortable: true, cell: (row) => <Badge kind={row.side === 'Internal' ? 'emphasis' : 'subtle'}>{row.side}</Badge> },
-  { key: 'activeAgreements', header: 'Active agreements', sortable: true, cell: (row) => <Text size="sm">{row.activeAgreements}</Text> },
+  { key: 'employeeId', header: 'Employee ID', sortable: true, cell: (row) => <Text size="sm">{row.employeeId || row.applicantId || '--'}</Text> },
+  { key: 'employmentType', header: 'Employment Type', sortable: true, cell: (row) => <Text size="sm">{row.employmentType || '--'}</Text> },
+  { key: 'status', header: 'Status', sortable: true, cell: (row) => <Text size="sm">{row.status || '--'}</Text> },
+  { key: 'location', header: 'Location', sortable: true, cell: (row) => <Text size="sm">{row.location || '--'}</Text> },
+  {
+    key: 'email', header: 'Email',
+    cell: (row) => (
+      <Stack gap="none">
+        {row.emails.map((email) => <Text key={email} size="sm" style={{ overflowWrap: 'anywhere' }}>{email}</Text>)}
+      </Stack>
+    ),
+  },
 ];
 
 const PARTY_FILTER_ALL = 'All';
@@ -598,43 +962,627 @@ function PartyFilterMenu({ label, value, options, onChange }: { label: string; v
   );
 }
 
-function PartiesPage({ view, onAskIris }: { view: PartiesView; onAskIris: () => void }) {
+type PartyRecord = Organization;
+interface MergeField { key: string; label: string; sum?: boolean }
+
+const ORGANIZATION_MERGE_FIELDS: MergeField[] = [
+  { key: 'name', label: 'Organization name' },
+  { key: 'role', label: 'Role' },
+  { key: 'side', label: 'Party side' },
+  { key: 'location', label: 'Location' },
+  { key: 'activeAgreements', label: 'Active agreements', sum: true },
+  { key: 'totalAgreements', label: 'Total agreements', sum: true },
+];
+
+const MERGE_MAX_RECORDS = 5;
+
+const fieldText = (record: PartyRecord, key: string) =>
+  String((record as unknown as Record<string, string | number>)[key] ?? '').trim();
+
+const agreementWeight = (record: PartyRecord) =>
+  record.activeAgreements * 1000 + ('totalAgreements' in record ? record.totalAgreements : 0);
+
+const survivorOf = (records: PartyRecord[]) => [...records].sort((a, b) => agreementWeight(b) - agreementWeight(a))[0];
+
+const distinctValues = (records: PartyRecord[], key: string) => [...new Set(records.map((r) => fieldText(r, key)).filter(Boolean))];
+
+function defaultMergeChoices(records: PartyRecord[], fields: MergeField[]): Record<string, string> {
+  const survivor = survivorOf(records);
+  const choices: Record<string, string> = {};
+  fields.filter((f) => !f.sum).forEach((f) => {
+    const source = fieldText(survivor, f.key) ? survivor : records.find((r) => fieldText(r, f.key)) ?? survivor;
+    choices[f.key] = source.id;
+  });
+  return choices;
+}
+
+function buildMergedRecord(records: PartyRecord[], fields: MergeField[], choices: Record<string, string>): PartyRecord {
+  const survivor = survivorOf(records);
+  const merged: Record<string, string | number> = { id: survivor.id };
+  fields.forEach((f) => {
+    if (f.sum) {
+      merged[f.key] = records.reduce((total, r) => total + Number(fieldText(r, f.key) || 0), 0);
+    } else {
+      const source = records.find((r) => r.id === choices[f.key]) ?? survivor;
+      merged[f.key] = fieldText(source, f.key);
+    }
+  });
+  return merged as unknown as PartyRecord;
+}
+
+function MergedPreview({ type, merged, fields, count }: { type: PartiesView; merged: PartyRecord; fields: MergeField[]; count: number }) {
+  const isPerson = false as boolean;
+  return (
+    <section className="merge-preview" aria-label="Merged record preview" aria-live="polite">
+      <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
+        {isPerson ? <Avatar size="small" initials={initialsOf(merged.name || '?')} /> : <Icon name="building-person" />}
+        <Stack gap="none" style={{ flex: 1, minWidth: 0 }}>
+          <Text weight="semibold">{merged.name || 'Unnamed record'}</Text>
+          <Text size="xs" color="secondary">{`${isPerson ? 'Person' : 'Organization'} · replaces ${count} ${isPerson ? 'people' : 'organizations'}`}</Text>
+        </Stack>
+        <Badge kind="success">Merged record</Badge>
+      </Inline>
+      <dl className="merge-preview-fields">
+        {fields.map((f) => {
+          const value = fieldText(merged, f.key);
+          return (
+            <div key={f.key} className="merge-preview-field">
+              <dt>{f.label}</dt>
+              <dd>{value || 'No value'}{f.sum ? ' (combined)' : ''}</dd>
+            </div>
+          );
+        })}
+      </dl>
+    </section>
+  );
+}
+
+function MergeFlow({ type, records, onClose, onMerged }: {
+  type: PartiesView;
+  records: PartyRecord[];
+  onClose: () => void;
+  onMerged: (merged: PartyRecord, removedIds: string[]) => void;
+}) {
+  const fields = ORGANIZATION_MERGE_FIELDS;
+  const noun = 'organizations';
+  const uid = useId();
+  const [stage, setStage] = useState<'compare' | 'confirm'>('compare');
+  const [choices, setChoices] = useState(() => defaultMergeChoices(records, fields));
+  const [highlight, setHighlight] = useState(true);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  const forceError = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('merge') === 'error';
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const merged = useMemo(() => buildMergedRecord(records, fields, choices), [records, fields, choices]);
+  const loading = status === 'loading';
+  const requestClose = () => { if (!loading) onClose(); };
+
+  const confirmMerge = () => {
+    setStatus('loading');
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      if (forceError && attempts.current === 1) { setStatus('error'); return; }
+      onMerged(merged, records.filter((r) => r.id !== merged.id).map((r) => r.id));
+    }, 900);
+  };
+
+  const template = `minmax(128px, 0.7fr) repeat(${records.length}, minmax(176px, 1fr))`;
+  const differingCount = fields.filter((f) => !f.sum && new Set(records.map((r) => fieldText(r, f.key))).size > 1).length;
+
+  if (stage === 'confirm') {
+    return (
+      <Modal
+        open
+        size="medium"
+        title="Confirm merge"
+        onClose={requestClose}
+        closeOnBackdropClick={false}
+        closeOnEscape={!loading}
+        footer={
+          <Inline gap="small" justify="end">
+            <Button kind="tertiary" onClick={() => { setStatus('idle'); setStage('compare'); }} disabled={loading}>Back</Button>
+            <Button kind="secondary" onClick={requestClose} disabled={loading}>Cancel</Button>
+            <Button kind="danger" onClick={confirmMerge} loading={loading}>{status === 'error' ? 'Try again' : 'Confirm merge'}</Button>
+          </Inline>
+        }
+      >
+        <Stack gap="medium">
+          <Banner kind="warning" closable={false}>This merge can&apos;t be undone.</Banner>
+          {status === 'error' && (
+            <Banner kind="danger" closable={false}>We couldn&apos;t complete the merge. Try again.</Banner>
+          )}
+          <Text size="sm" color="secondary">
+            {`The ${records.length} ${noun} below will be permanently combined into one record and can't be separated afterward.${status === 'error' ? ' Nothing was changed.' : ''}`}
+          </Text>
+          <Stack gap="small">
+            <Text size="sm" weight="semibold">{`${records.length} ${noun} being merged`}</Text>
+            <ul className="merge-sources">
+              {records.map((r) => (
+                <li key={r.id}>
+                  <Text size="sm" weight="semibold">{r.name}</Text>
+                  <Text size="xs" color="secondary">{`${r.role} · ${r.activeAgreements} active agreements`}</Text>
+                </li>
+              ))}
+            </ul>
+          </Stack>
+          <Stack gap="small">
+            <Text size="sm" weight="semibold">Resulting record</Text>
+            <MergedPreview type={type} merged={merged} fields={fields} count={records.length} />
+          </Stack>
+        </Stack>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal
+      open
+      size="xlarge"
+      title={`Merge ${records.length} ${noun}`}
+      onClose={requestClose}
+      footer={
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" onClick={onClose}>Cancel</Button>
+          <Button kind="primary" onClick={() => setStage('confirm')}>Review merge</Button>
+        </Inline>
+      }
+    >
+      <Stack gap="medium">
+        <Inline justify="between" align="center" gap="medium">
+          <Text size="sm" color="secondary">
+            {differingCount > 0
+              ? `Choose the value to keep for each field. ${differingCount} ${differingCount === 1 ? 'field differs' : 'fields differ'}. Agreement counts are combined.`
+              : 'These records match on every field. Agreement counts are combined.'}
+          </Text>
+          <Switch label="Highlight differences" checked={highlight} onChange={setHighlight} />
+        </Inline>
+
+        <MergedPreview type={type} merged={merged} fields={fields} count={records.length} />
+
+        <div className="merge-scroll">
+          <div className="merge-grid" style={{ ['--merge-template' as string]: template, ['--merge-min' as string]: `${128 + records.length * 176}px` } as CSSProperties}>
+            <div className="merge-row merge-head">
+              <span className="merge-label"><Text size="xs" color="secondary">Field</Text></span>
+              {records.map((r) => (
+                <div key={r.id} className="merge-cell merge-head-cell">
+                  <Text size="sm" weight="semibold">{r.name}</Text>
+                  <Text size="xs" color="secondary">{r.location || 'No location'}</Text>
+                  <Text size="xs" color="secondary">{`${r.activeAgreements} active agreements`}</Text>
+                </div>
+              ))}
+            </div>
+            {fields.map((f) => {
+              const labelId = `${uid}-${f.key}-label`;
+              const values = distinctValues(records, f.key);
+              const differs = !f.sum && new Set(records.map((r) => fieldText(r, f.key))).size > 1;
+              const rowProps = { className: 'merge-row', 'data-differs': highlight && differs ? 'true' : undefined } as const;
+
+              if (f.sum) {
+                const total = records.reduce((t, r) => t + Number(fieldText(r, f.key) || 0), 0);
+                return (
+                  <div key={f.key} {...rowProps}>
+                    <span id={labelId} className="merge-label"><Text size="sm" weight="semibold">{f.label}</Text></span>
+                    <div className="merge-cell merge-span">
+                      <Text size="sm">{`${total} combined from ${records.map((r) => fieldText(r, f.key)).join(' + ')}`}</Text>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (values.length <= 1) {
+                const holders = records.filter((r) => fieldText(r, f.key));
+                const note = values.length === 0
+                  ? 'No value in any record'
+                  : holders.length === records.length ? 'Same in all records' : `Only ${holders.map((r) => r.name).join(', ')} has a value`;
+                return (
+                  <div key={f.key} {...rowProps}>
+                    <span id={labelId} className="merge-label"><Text size="sm" weight="semibold">{f.label}</Text></span>
+                    <div className="merge-cell merge-span">
+                      <Text size="sm">{values[0] || 'No value'}</Text>
+                      <Text size="xs" color="secondary">{note}</Text>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={f.key} role="radiogroup" aria-labelledby={labelId} {...rowProps}>
+                  <span id={labelId} className="merge-label"><Text size="sm" weight="semibold">{f.label}</Text></span>
+                  {records.map((r) => {
+                    const value = fieldText(r, f.key);
+                    const isSelected = choices[f.key] === r.id;
+                    return (
+                      <div key={r.id} className="merge-cell" data-selected={isSelected ? 'true' : undefined}>
+                        <Radio
+                          name={`${uid}-${f.key}`}
+                          label={value || 'No value'}
+                          aria-label={`${value || 'No value'}, from ${r.name}`}
+                          checked={isSelected}
+                          disabled={!value}
+                          onChange={() => setChoices((current) => ({ ...current, [f.key]: r.id }))}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Stack>
+    </Modal>
+  );
+}
+
+type PersonFieldKey = 'name' | 'applicantId' | 'employeeId' | 'employmentType' | 'status' | 'location';
+
+const PERSON_RADIO_FIELDS: { key: PersonFieldKey; label: string }[] = [
+  { key: 'name', label: 'Display name' },
+  { key: 'applicantId', label: 'Applicant ID' },
+  { key: 'employeeId', label: 'Employee ID' },
+  { key: 'employmentType', label: 'Employment type' },
+  { key: 'status', label: 'Status' },
+  { key: 'location', label: 'Location' },
+];
+
+const emailKey = (id: string, email: string) => `${id}|${email}`;
+
+function PreviewField({ label, value, source, sourceLink, ai }: {
+  label: string;
+  value: string | string[];
+  source?: string;
+  sourceLink?: boolean;
+  ai?: boolean;
+}) {
+  const values = Array.isArray(value) ? value : [value];
+  return (
+    <div className="pm-field">
+      <span className="pm-field-label">{label}</span>
+      <div className="pm-field-row">
+        <div className="pm-field-values">
+          {values.map((v) => (
+            <span key={v} className="pm-field-value">
+              {ai && <Icon name="ai-spark-filled" size="small" className="pm-ai" aria-hidden />}
+              {v}
+            </span>
+          ))}
+        </div>
+        {source && (
+          <span className="pm-field-source">
+            {'Source: '}
+            {sourceLink ? <a href="#source" onClick={(event) => event.preventDefault()}>{source}</a> : source}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DuplicatePartiesOverlay({ records, suggested, onClose, onIgnore, onMerged }: {
+  records: Person[];
+  suggested: boolean;
+  onClose: () => void;
+  onIgnore: () => void;
+  onMerged: (merged: Person, removedIds: string[]) => void;
+}) {
+  const uid = useId();
+  const [included, setIncluded] = useState<Set<string>>(() => new Set(
+    records.filter((r) => !suggested || r.name === records[0].name).map((r) => r.id),
+  ));
+  const [picks, setPicks] = useState<Partial<Record<PersonFieldKey, string>>>({});
+  const [emailsOff, setEmailsOff] = useState<Set<string>>(new Set());
+  const [highlight, setHighlight] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [stage, setStage] = useState<'compare' | 'confirm'>('compare');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  const forceError = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('merge') === 'error';
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const active = useMemo(() => records.filter((r) => included.has(r.id)), [records, included]);
+  const loading = status === 'loading';
+
+  const resolvedId = (key: PersonFieldKey): string | undefined => {
+    const picked = active.find((r) => r.id === picks[key] && r[key]);
+    if (picked) return picked.id;
+    const withValue = active.filter((r) => r[key]);
+    return (key === 'location' ? withValue[withValue.length - 1] : withValue[0])?.id;
+  };
+
+  const differs = (key: PersonFieldKey) => new Set(active.map((r) => r[key])).size > 1;
+  const emailsDiffer = new Set(active.flatMap((r) => r.emails)).size > 1;
+
+  const merged: Person = (() => {
+    const base = active[0] ?? records[0];
+    const pick = (key: PersonFieldKey) => active.find((r) => r.id === resolvedId(key))?.[key] ?? '';
+    return {
+      id: base.id,
+      name: pick('name'),
+      applicantId: pick('applicantId'),
+      employeeId: pick('employeeId'),
+      employmentType: pick('employmentType'),
+      status: pick('status'),
+      location: pick('location'),
+      emails: [...new Set(active.flatMap((r) => r.emails.filter((e) => !emailsOff.has(emailKey(r.id, e)))))],
+      phone: active.find((r) => r.phone)?.phone ?? '',
+      hireDate: active.find((r) => r.hireDate)?.hireDate ?? '',
+      verified: active.some((r) => r.verified),
+    };
+  })();
+
+  const toggleIncluded = (id: string, on: boolean) =>
+    setIncluded((current) => { const next = new Set(current); if (on) next.add(id); else next.delete(id); return next; });
+
+  const toggleEmail = (id: string, email: string, on: boolean) =>
+    setEmailsOff((current) => { const next = new Set(current); const key = emailKey(id, email); if (on) next.delete(key); else next.add(key); return next; });
+
+  const canMerge = active.length >= 2;
+  const requestClose = () => { if (!loading) onClose(); };
+
+  const confirmMerge = () => {
+    setStatus('loading');
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      if (forceError && attempts.current === 1) { setStatus('error'); return; }
+      onMerged(merged, active.filter((r) => r.id !== merged.id).map((r) => r.id));
+    }, 900);
+  };
+
+  if (stage === 'confirm') {
+    return (
+      <Modal
+        open
+        size="medium"
+        title="Confirm merge"
+        onClose={requestClose}
+        closeOnBackdropClick={false}
+        closeOnEscape={!loading}
+        footer={
+          <Inline gap="small" justify="end">
+            <Button kind="tertiary" onClick={() => { setStatus('idle'); setStage('compare'); }} disabled={loading}>Back</Button>
+            <Button kind="secondary" onClick={requestClose} disabled={loading}>Cancel</Button>
+            <Button kind="danger" onClick={confirmMerge} loading={loading}>{status === 'error' ? 'Try again' : 'Confirm merge'}</Button>
+          </Inline>
+        }
+      >
+        <Stack gap="medium">
+          <Banner kind="warning" closable={false}>This merge can&apos;t be undone.</Banner>
+          {status === 'error' && <Banner kind="danger" closable={false}>We couldn&apos;t complete the merge. Try again.</Banner>}
+          <Text size="sm" color="secondary">
+            {`The ${active.length} parties below will be permanently combined into ${merged.name} and can't be separated afterward.${status === 'error' ? ' Nothing was changed.' : ''}`}
+          </Text>
+          <ul className="merge-sources">
+            {active.map((r) => (
+              <li key={r.id}>
+                <Text size="sm" weight="semibold">{r.name}</Text>
+                <Text size="xs" color="secondary">{r.emails.join(', ') || 'No email'}</Text>
+              </li>
+            ))}
+          </ul>
+        </Stack>
+      </Modal>
+    );
+  }
+
+  const gridStyle = { ['--pm-cols' as string]: records.length } as CSSProperties;
+  const mergeLabel = `Merge ${active.length} ${active.length === 1 ? 'Party' : 'Parties'}`;
+
+  const radioRow = (field: typeof PERSON_RADIO_FIELDS[number]) => {
+    const groupId = `${uid}-${field.key}`;
+    const chosen = resolvedId(field.key);
+    const diff = highlight && differs(field.key);
+    return (
+      <div key={field.key} className="pm-row" role="radiogroup" aria-labelledby={`${groupId}-label`}>
+        <span id={`${groupId}-label`} className="pm-label" data-strong={field.key === 'name' ? 'true' : undefined}>{field.label}</span>
+        {records.map((r) => {
+          const off = !included.has(r.id);
+          const value = r[field.key];
+          return (
+            <div key={r.id} className="pm-cell" data-off={off ? 'true' : undefined} data-diff={diff && value ? 'true' : undefined}>
+              {value ? (
+                <Radio
+                  name={groupId}
+                  label={value}
+                  aria-label={`${value}, from ${r.name}`}
+                  checked={!off && chosen === r.id}
+                  disabled={off}
+                  onChange={() => setPicks((current) => ({ ...current, [field.key]: r.id }))}
+                />
+              ) : (
+                <Text size="sm" color="secondary">--</Text>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <Modal
+      open
+      size="xlarge"
+      className="merge-overlay"
+      title="Review duplicate parties"
+      onClose={requestClose}
+      footer={
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" onClick={onIgnore}>Ignore</Button>
+          <Button kind="primary" disabled={!canMerge} onClick={() => setStage('confirm')}>{mergeLabel}</Button>
+        </Inline>
+      }
+    >
+      <div className="pm-layout">
+        <div className="pm-main">
+          <div className="pm-intro">
+            <Stack gap="small">
+              <Heading level={3}>Select people to merge</Heading>
+              <Text color="secondary">Choose data from the listed fields to merge into one record</Text>
+            </Stack>
+            <Inline gap="medium" align="center" style={{ flexWrap: 'nowrap' }}>
+              <Switch label="Highlight differences" checked={highlight} onChange={setHighlight} />
+              {!showPreview && (
+                <Button kind="secondary" size="small" startElement={<Icon name="eye" size="small" />} onClick={() => setShowPreview(true)}>Preview</Button>
+              )}
+            </Inline>
+          </div>
+
+          <div className="pm-card pm-top" style={gridStyle}>
+            <div className="pm-row">
+              <span className="pm-label" data-strong="true">Contact</span>
+              {records.map((r) => (
+                <div key={r.id} className="pm-cell pm-link">
+                  <Checkbox
+                    label={r.name}
+                    checked={included.has(r.id)}
+                    onChange={(event: React.ChangeEvent<HTMLInputElement>) => toggleIncluded(r.id, event.target.checked)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pm-card" style={gridStyle}>
+            {radioRow(PERSON_RADIO_FIELDS[0])}
+            <div className="pm-row" role="group" aria-labelledby={`${uid}-contact-label`}>
+              <span id={`${uid}-contact-label`} className="pm-label" data-strong="true">Contact</span>
+              {records.map((r) => {
+                const off = !included.has(r.id);
+                return (
+                  <div key={r.id} className="pm-cell pm-stack" data-off={off ? 'true' : undefined} data-diff={highlight && emailsDiffer ? 'true' : undefined}>
+                    {r.emails.map((email) => (
+                      <Checkbox
+                        key={email}
+                        label={email}
+                        checked={!off && !emailsOff.has(emailKey(r.id, email))}
+                        disabled={off}
+                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => toggleEmail(r.id, email, event.target.checked)}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            {PERSON_RADIO_FIELDS.slice(1).map(radioRow)}
+          </div>
+        </div>
+
+        {showPreview && (
+          <aside className="pm-preview" aria-label="Merged record preview">
+            <div className="pm-preview-scroll">
+              <div className="pm-preview-top">
+                <PreviewField label="Name" value={merged.name || '--'} />
+                <Button kind="secondary" size="small" startElement={<Icon name="eye-slash" size="small" />} onClick={() => setShowPreview(false)}>Hide Preview</Button>
+              </div>
+              <PreviewField label="Party type" value="Individual" ai />
+              <Accordion
+                allowMultiple
+                defaultOpenItems={['contact', 'employee']}
+                displayLevel="xs"
+                items={[
+                  {
+                    id: 'contact',
+                    title: 'Contact information',
+                    metadata: String((merged.phone ? 1 : 0) + merged.emails.length),
+                    content: (
+                      <Stack gap="medium">
+                        {merged.phone && <PreviewField label="Phone" value={merged.phone} />}
+                        <PreviewField label="Email" value={merged.emails.length ? merged.emails : '--'} />
+                      </Stack>
+                    ),
+                  },
+                  {
+                    id: 'employee',
+                    title: 'Employee details',
+                    metadata: '7',
+                    content: (
+                      <Stack gap="medium">
+                        <PreviewField label="Candidate ID" value={merged.applicantId || '--'} source="Greenhouse" />
+                        <PreviewField label="Employee ID" value={merged.employeeId || '--'} source="Workday" />
+                        <PreviewField label="Employment type" value={merged.employmentType || '--'} source="Workday" />
+                        <PreviewField label="Status" value={merged.status || '--'} />
+                        <PreviewField label="Location" value={merged.location || '--'} source="Hiring Agreement Name" sourceLink ai />
+                        <PreviewField label="Hire date" value={merged.hireDate || '--'} source="Hiring Agreement Name" sourceLink ai />
+                        <PreviewField label="Termination date" value="--" />
+                      </Stack>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          </aside>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function PartiesPage(props: PartiesPageProps) {
+  return (
+    <ToastProvider>
+      <PartiesPageContent {...props} />
+    </ToastProvider>
+  );
+}
+
+interface PartiesPageProps {
+  view: PartiesView;
+  onAskIris: () => void;
+  organizationsData: Organization[];
+  peopleData: Person[];
+  onMerge: (type: PartiesView, merged: Organization | Person, removedIds: string[]) => void;
+}
+
+function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge }: PartiesPageProps) {
   const isOrganizations = view === 'organizations';
+  const { toast } = useToast();
   const forceEmpty = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('parties') === 'empty';
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterA, setFilterA] = useState(PARTY_FILTER_ALL);
   const [filterB, setFilterB] = useState(PARTY_FILTER_ALL);
+  const [filterC, setFilterC] = useState(PARTY_FILTER_ALL);
+  const [bannerOpen, setBannerOpen] = useState(true);
+  const [suggestedOpen, setSuggestedOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ column?: string; direction: 'ascending' | 'descending' | null }>({ direction: null });
-  const [notice, setNotice] = useState('');
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setLoading(false), 500);
     return () => window.clearTimeout(timer);
   }, []);
 
-  const organizationNames = useMemo(() => [...new Set(PEOPLE_DATA.map((person) => person.organization))].sort(), []);
-  const roleNames = useMemo(() => [...new Set(ORGANIZATIONS_DATA.map((org) => org.role))].sort(), []);
+  const uniqueSorted = (values: string[]) => [...new Set(values.filter(Boolean))].sort();
+  const employmentTypes = useMemo(() => uniqueSorted(peopleData.map((person) => person.employmentType)), [peopleData]);
+  const statusNames = useMemo(() => uniqueSorted(peopleData.map((person) => person.status)), [peopleData]);
+  const locationNames = useMemo(() => uniqueSorted(peopleData.map((person) => person.location)), [peopleData]);
+  const roleNames = useMemo(() => [...new Set(organizationsData.map((org) => org.role))].sort(), [organizationsData]);
 
   const organizations = useMemo(() => {
     if (forceEmpty) return [];
     const q = search.trim().toLowerCase();
-    return ORGANIZATIONS_DATA.filter((org) =>
+    return organizationsData.filter((org) =>
       (filterA === PARTY_FILTER_ALL || org.role === filterA) &&
       (filterB === PARTY_FILTER_ALL || org.side === filterB) &&
       (!q || org.name.toLowerCase().includes(q) || org.location.toLowerCase().includes(q) || org.role.toLowerCase().includes(q)));
-  }, [forceEmpty, search, filterA, filterB]);
+  }, [forceEmpty, search, filterA, filterB, organizationsData]);
 
   const people = useMemo(() => {
     if (forceEmpty) return [];
     const q = search.trim().toLowerCase();
-    return PEOPLE_DATA.filter((person) =>
-      (filterA === PARTY_FILTER_ALL || person.organization === filterA) &&
-      (filterB === PARTY_FILTER_ALL || person.side === filterB) &&
-      (!q || person.name.toLowerCase().includes(q) || person.email.toLowerCase().includes(q) || person.organization.toLowerCase().includes(q) || person.title.toLowerCase().includes(q)));
-  }, [forceEmpty, search, filterA, filterB]);
+    return peopleData.filter((person) =>
+      (filterA === PARTY_FILTER_ALL || person.employmentType === filterA) &&
+      (filterB === PARTY_FILTER_ALL || person.status === filterB) &&
+      (filterC === PARTY_FILTER_ALL || person.location === filterC) &&
+      (!q || person.name.toLowerCase().includes(q) || person.emails.some((email) => email.toLowerCase().includes(q)) || person.employeeId.includes(q) || person.location.toLowerCase().includes(q)));
+  }, [forceEmpty, search, filterA, filterB, filterC, peopleData]);
 
   const visibleIds = useMemo(() => new Set<string | number>((isOrganizations ? organizations : people).map((row) => row.id)), [isOrganizations, organizations, people]);
 
@@ -646,23 +1594,35 @@ function PartiesPage({ view, onAskIris }: { view: PartiesView; onAskIris: () => 
     });
   }, [visibleIds]);
 
-  const filtersActive = Boolean(search) || filterA !== PARTY_FILTER_ALL || filterB !== PARTY_FILTER_ALL;
-  const clearAll = () => { setSearch(''); setFilterA(PARTY_FILTER_ALL); setFilterB(PARTY_FILTER_ALL); };
+  const filtersActive = Boolean(search) || filterA !== PARTY_FILTER_ALL || filterB !== PARTY_FILTER_ALL || filterC !== PARTY_FILTER_ALL;
+  const clearAll = () => { setSearch(''); setFilterA(PARTY_FILTER_ALL); setFilterB(PARTY_FILTER_ALL); setFilterC(PARTY_FILTER_ALL); };
   const noun = isOrganizations ? 'organizations' : 'people';
   const rowCount = isOrganizations ? organizations.length : people.length;
+
+  const selectedOrganizations = useMemo(() => organizations.filter((row) => selected.has(row.id)), [organizations, selected]);
+  const selectedPeople = useMemo(() => people.filter((row) => selected.has(row.id)), [people, selected]);
+  const selectedRecords: (Organization | Person)[] = isOrganizations ? selectedOrganizations : selectedPeople;
+  const mixedSides = isOrganizations && new Set(selectedOrganizations.map((record) => record.side)).size > 1;
+  const mergeBlocker =
+    selectedRecords.length < 2 ? 'Select at least 2 to merge'
+    : selectedRecords.length > MERGE_MAX_RECORDS ? `Select up to ${MERGE_MAX_RECORDS} to merge`
+    : mixedSides ? "Can't merge internal and external records"
+    : '';
+
+  const handleMerged = (merged: Organization | Person, removedIds: string[]) => {
+    const count = removedIds.length + 1;
+    onMerge(view, merged, removedIds);
+    setMergeOpen(false);
+    setSuggestedOpen(false);
+    setSelected(new Set());
+    toast({ kind: 'success', children: `Merged ${count} ${noun} into ${merged.name}.` });
+  };
 
   const actionBarContent = (
     <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
       <Button kind="tertiary" size="small" onClick={() => setSelected(new Set())}>Clear</Button>
-      <Button
-        kind="secondary"
-        size="small"
-        disabled={selected.size < 2}
-        onClick={() => setNotice(`Merge isn't available in this prototype yet. ${selected.size} ${noun} selected.`)}
-      >
-        Merge
-      </Button>
-      {selected.size < 2 && <Text size="xs" color="secondary">Select at least 2 to merge</Text>}
+      <Button kind="secondary" size="small" disabled={Boolean(mergeBlocker)} onClick={() => setMergeOpen(true)}>Merge</Button>
+      {mergeBlocker && <Text size="xs" color="secondary">{mergeBlocker}</Text>}
     </Inline>
   );
 
@@ -688,7 +1648,6 @@ function PartiesPage({ view, onAskIris }: { view: PartiesView; onAskIris: () => 
   return (
     <AgreementTableView
       paddingVariant="default"
-      banner={notice ? <Banner kind="information" closable onClose={() => setNotice('')}>{notice}</Banner> : undefined}
       pageHeader={
         <Stack gap="small" style={{ width: '100%' }}>
           <PageHeader
@@ -702,22 +1661,27 @@ function PartiesPage({ view, onAskIris }: { view: PartiesView; onAskIris: () => 
               </>
             }
           />
-          <Text size="sm" color="secondary">
-            {isOrganizations
-              ? 'Companies you have agreements with, including your own entities.'
-              : 'Individuals who sign, approve or are named across your agreements.'}
-          </Text>
+          {isOrganizations && <Text size="sm" color="secondary">Companies you have agreements with, including your own entities.</Text>}
+          {!isOrganizations && bannerOpen && (
+            <Banner kind="promo" customIcon={<IrisIcon size={20} />} onClose={() => setBannerOpen(false)}>
+              {'You have '}<strong>48 parties</strong>{' with similar names. We suggest merging these parties for more accurate reporting. '}
+              <Link kind="subtle" href="#review-merge" onClick={(event) => { event.preventDefault(); setSuggestedOpen(true); }}>Review and Merge</Link>
+            </Banner>
+          )}
         </Stack>
       }
       filterBar={
         <FilterBar
-          search={{ value: search, onChange: setSearch, placeholder: isOrganizations ? 'Search organizations...' : 'Search people...' }}
+          search={{ value: search, onChange: setSearch, placeholder: isOrganizations ? 'Search organizations...' : 'Search Employees' }}
           filters={
             <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
               {isOrganizations
                 ? <PartyFilterMenu label="Role" value={filterA} options={roleNames} onChange={setFilterA} />
-                : <PartyFilterMenu label="Organization" value={filterA} options={organizationNames} onChange={setFilterA} />}
-              <PartyFilterMenu label="Party side" value={filterB} options={['Internal', 'External']} onChange={setFilterB} />
+                : <PartyFilterMenu label="Employment Type" value={filterA} options={employmentTypes} onChange={setFilterA} />}
+              {isOrganizations
+                ? <PartyFilterMenu label="Party side" value={filterB} options={['Internal', 'External']} onChange={setFilterB} />
+                : <PartyFilterMenu label="Status" value={filterB} options={statusNames} onChange={setFilterB} />}
+              {!isOrganizations && <PartyFilterMenu label="Location" value={filterC} options={locationNames} onChange={setFilterC} />}
               {filtersActive && <Button kind="tertiary" size="small" onClick={clearAll}>Clear all</Button>}
             </Inline>
           }
@@ -737,6 +1701,27 @@ function PartiesPage({ view, onAskIris }: { view: PartiesView; onAskIris: () => 
         <DataTable {...tableProps} columns={organizationColumns} data={organizations} getRowKey={(row) => row.id} />
       ) : (
         <DataTable {...tableProps} columns={personColumns} data={people} getRowKey={(row) => row.id} />
+      )}
+      {isOrganizations && mergeOpen && !mergeBlocker && (
+        <MergeFlow type={view} records={selectedOrganizations} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />
+      )}
+      {!isOrganizations && mergeOpen && !mergeBlocker && (
+        <DuplicatePartiesOverlay
+          records={selectedPeople}
+          suggested={false}
+          onClose={() => setMergeOpen(false)}
+          onIgnore={() => { setMergeOpen(false); toast({ kind: 'information', children: 'Marked as not duplicates.' }); }}
+          onMerged={handleMerged}
+        />
+      )}
+      {!isOrganizations && suggestedOpen && (
+        <DuplicatePartiesOverlay
+          records={peopleData.filter((person) => person.name.startsWith('Dale Simmon'))}
+          suggested
+          onClose={() => setSuggestedOpen(false)}
+          onIgnore={() => { setSuggestedOpen(false); setBannerOpen(false); toast({ kind: 'information', children: 'Marked as not duplicates.' }); }}
+          onMerged={handleMerged}
+        />
       )}
     </AgreementTableView>
   );
@@ -893,7 +1878,7 @@ const workspaceColumns: DataTableColumn<Workspace>[] = [
 
 /* ═══════════════════════════════════════
    Templates Data (matches real DocuSign)
-   ════════════════════════════════��══════ */
+   ═════════════════��═════════════����══════ */
 
 interface TemplateItem {
   id: string;
@@ -910,6 +1895,7 @@ interface TemplateItem {
   kind?: TemplateLibraryKind;
   status?: 'Published' | 'Draft';
   document?: { slug: string; pageCount: number };
+  journey?: 'i9';
 }
 
 type TemplateLibraryKind = 'envelope' | 'clause' | 'document' | 'workspace' | 'workflow' | 'web-form' | 'elastic';
@@ -919,7 +1905,7 @@ const TEMPLATE_VIEW_LABELS: Record<TemplatesSidebarView, string> = {
   'my-templates': 'My Templates', 'shared-with-me': 'Shared with Me', favorites: 'Favorites', 'all-templates': 'All Templates',
   clauses: 'Clauses', 'document-templates': 'Document Templates', 'workspace-templates': 'Workspace Templates',
   'workflow-templates': 'Workflow Templates', 'my-web-forms': 'My Web Forms', 'shared-web-forms': 'Shared Web Forms',
-  'all-web-forms': 'All Web Forms', 'template-gallery': 'Template Gallery', 'elastic-templates': 'Elastic Templates',
+  'all-web-forms': 'All Web Forms', 'elastic-templates': 'Elastic Templates',
 };
 
 const TEMPLATE_KINDS: Record<TemplateLibraryKind, { label: string; icon: string; view: TemplatesSidebarView; description: string }> = {
@@ -953,6 +1939,7 @@ const TEMPLATES_DATA: TemplateItem[] = [
   { id: '8', name: 'Vendor Onboarding', description: 'New vendor setup and compliance form', owner: 'Procurement', lastModified: '12/08/2025', shared: true, uses: 45, favorited: false },
   { id: '9', name: 'Employment Agreement', description: 'Full-time employment agreement', owner: 'HR Department', lastModified: '03/01/2026', shared: true, uses: 178, favorited: false },
   { id: '10', name: 'Change Order', description: 'Amendment to existing SOW or contract', owner: 'Akshat Mishra', lastModified: '03/22/2026', shared: false, uses: 3, favorited: false },
+  { id: 'i9', name: 'Form I-9: Employment Eligibility Verification', description: 'Verify identity and work authorization for every new hire. The employee completes Section 1, then your team completes Section 2.', owner: 'People Team', lastModified: '10/23/2026', shared: true, uses: 31, favorited: true, journey: 'i9', created: '10/23/2026', folder: 'HR onboarding' },
 ];
 
 function templateDocumentUrl(template: TemplateItem, page?: number) {
@@ -1048,6 +2035,344 @@ function TemplateEditorDialog({ editor, onClose, onSave }: { editor: TemplateEdi
   </Modal>;
 }
 
+/* ═══════════════════════════════════════
+   Journey shell + I-9 envelope setup + signer journey
+   Shell decision: a focused full-screen layer (portal, aria-modal) with a
+   Stepper, scrollable body and sticky footer. It sits above the product shell
+   and returns focus to its opener. Reusable by any multi-step signer flow.
+   Demo states: ?i9=setup-error | ?i9=error | ?i9=expired
+   ═══════════════════════════════════════ */
+
+interface I9Setup { recipientName: string; recipientEmail: string; startDate: string; employerName: string; employerEmail: string; message: string; expiresInDays: string; }
+interface I9Session extends I9Setup {
+  step: number;
+  personal: { firstName: string; lastName: string; otherNames: string; dob: string; address: string; city: string; state: string; zip: string; email: string; phone: string };
+  authorization: { status: '' | 'citizen' | 'national' | 'permanent' | 'authorized'; aNumber: string; expires: string };
+  attested: boolean; signature: string; submittedAt?: string;
+}
+
+const I9_STEPS = [
+  { id: 'instructions', title: 'Instructions' }, { id: 'personal', title: 'Personal information' }, { id: 'authorization', title: 'Work authorization' },
+  { id: 'review', title: 'Review' }, { id: 'sign', title: 'Sign' }, { id: 'complete', title: 'Complete' },
+];
+const US_STATES = 'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split(' ');
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const I9_AUTHORIZATION_OPTIONS: { value: Exclude<I9Session['authorization']['status'], ''>; label: string; description: string }[] = [
+  { value: 'citizen', label: 'A citizen of the United States', description: 'Includes people born in the U.S. and naturalized citizens.' },
+  { value: 'national', label: 'A noncitizen national of the United States', description: 'For example, people born in American Samoa.' },
+  { value: 'permanent', label: 'A lawful permanent resident', description: 'You will be asked for your USCIS or A-Number.' },
+  { value: 'authorized', label: 'A noncitizen authorized to work', description: 'You will be asked for an expiration date and your A-Number.' },
+];
+
+function demoFlag(name: string) { return typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(name); }
+function formatLongDate(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const update = () => setMatches(list.matches);
+    update();
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
+
+function JourneyShell({ title, subtitle, steps, activeIndex, onExit, footer, hideProgress, children }: {
+  title: string; subtitle?: string; steps: { id: string; title: string }[]; activeIndex: number; onExit: () => void;
+  footer?: React.ReactNode; hideProgress?: boolean; children: React.ReactNode;
+}) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef(onExit);
+  exitRef.current = onExit;
+  const narrow = useMediaQuery('(max-width: 720px)');
+  const titleId = useId();
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; opener?.focus?.(); };
+  }, []);
+
+  useEffect(() => { shellRef.current?.querySelector<HTMLElement>('[data-journey-focus]')?.focus(); }, [activeIndex]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const shell = shellRef.current;
+      if (!shell || Array.from(document.querySelectorAll('[aria-modal="true"]')).some(node => node !== shell)) return;
+      if (event.key === 'Escape') { exitRef.current(); return; }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(shell.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(node => node.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !shell.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  return createPortal(
+    <div ref={shellRef} className="journey-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <header className="journey-header">
+        <div className="journey-header-text">
+          <Text size="md" weight="semibold"><span id={titleId}>{title}</span></Text>
+          {subtitle && <Text size="xs" color="secondary">{subtitle}</Text>}
+        </div>
+        <Button kind="tertiary" size="small" startElement={<Icon name="close" size="small" />} onClick={onExit}>Exit</Button>
+      </header>
+      {!hideProgress && <nav className="journey-progress" aria-label="Progress">
+        <Stepper steps={steps.map((step, index) => ({ id: step.id, title: step.title, completed: index < activeIndex }))} activeStep={activeIndex} showDescription={false}
+          compact={narrow} compactTitle={steps[activeIndex]?.title} compactCurrent={activeIndex + 1} compactTotal={steps.length} />
+      </nav>}
+      <main className="journey-main"><div className="journey-content">
+        <p className="sr-only" role="status" aria-live="polite">{hideProgress ? title : `Step ${activeIndex + 1} of ${steps.length}: ${steps[activeIndex]?.title}`}</p>
+        {children}
+      </div></main>
+      {footer && <footer className="journey-footer"><div className="journey-footer-inner">{footer}</div></footer>}
+    </div>,
+    document.body,
+  );
+}
+
+function JourneyHeading({ title, description }: { title: string; description?: string }) {
+  return <Stack gap="small">
+    <h2 className="journey-step-title" tabIndex={-1} data-journey-focus>{title}</h2>
+    {description && <Text size="md" color="secondary">{description}</Text>}
+  </Stack>;
+}
+
+function I9SetupDialog({ template, onCancel, onStart }: { template: TemplateItem; onCancel: () => void; onStart: (setup: I9Setup) => void }) {
+  const [stage, setStage] = useState<'form' | 'review'>('form');
+  const [form, setForm] = useState<I9Setup>({ recipientName: '', recipientEmail: '', startDate: '', employerName: '', employerEmail: '', message: '', expiresInDays: '7' });
+  const [errors, setErrors] = useState<Partial<Record<keyof I9Setup, string>>>({});
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const loading = status === 'loading';
+
+  const update = (key: keyof I9Setup) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm(current => ({ ...current, [key]: event.target.value }));
+    setErrors(current => ({ ...current, [key]: undefined }));
+  };
+  const validate = () => {
+    const next: Partial<Record<keyof I9Setup, string>> = {};
+    if (!form.recipientName.trim()) next.recipientName = 'Enter the new hire’s full name.';
+    if (!form.recipientEmail.trim()) next.recipientEmail = 'Enter the new hire’s email address.';
+    else if (!EMAIL_PATTERN.test(form.recipientEmail)) next.recipientEmail = 'Enter a valid email address, like name@company.com.';
+    if (!form.startDate) next.startDate = 'Choose the employee’s first day of work.';
+    if (!form.employerName.trim()) next.employerName = 'Enter the employer representative’s name.';
+    if (!form.employerEmail.trim()) next.employerEmail = 'Enter the employer representative’s email address.';
+    else if (!EMAIL_PATTERN.test(form.employerEmail)) next.employerEmail = 'Enter a valid email address, like name@company.com.';
+    else if (form.employerEmail.trim().toLowerCase() === form.recipientEmail.trim().toLowerCase()) next.employerEmail = 'The employer representative needs a different email than the new hire.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const start = () => {
+    if (loading) return;
+    setStatus('loading');
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      if (demoFlag('i9') === 'setup-error' && attempts.current === 1) { setStatus('error'); return; }
+      onStart(form);
+    }, 900);
+  };
+
+  return <Modal open onClose={onCancel} title={stage === 'form' ? 'Set up Form I-9' : 'Review before starting'} size="large" closeOnEscape={!loading} closeOnBackdropClick={!loading}
+    footer={<Inline justify="end" gap="small">
+      {stage === 'form'
+        ? <><Button kind="secondary" onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={() => { if (validate()) setStage('review'); }}>Continue</Button></>
+        : <><Button kind="secondary" onClick={() => { setStatus('idle'); setStage('form'); }} disabled={loading}>Back</Button><Button kind="secondary" onClick={onCancel} disabled={loading}>Cancel</Button><Button kind="primary" loading={loading} onClick={start}>Start envelope</Button></>}
+    </Inline>}>
+    <Stack gap="large">
+      <Card radius="small"><Card.Body><Inline gap="medium" align="center">
+        <Icon name="document" size="medium" />
+        <Stack gap="none"><Text size="md" weight="semibold">{template.name}</Text><Text size="sm" color="secondary">Section 1 for the employee · Section 2 for the employer · 2 documents</Text></Stack>
+        <Badge kind="success" text="Published" />
+      </Inline></Card.Body></Card>
+      {status === 'error' && <Alert kind="danger" title="We couldn’t start the envelope" action={{ label: 'Try again', onClick: start }}>Something went wrong on our side. Your answers are still here.</Alert>}
+      {stage === 'form' ? <Stack gap="large">
+        <Input label="Sender" value="Akshat Mishra · People Team" readOnly description="The envelope is sent from your account." />
+        <Stack gap="medium">
+          <Text size="md" weight="semibold">Employee (signer)</Text>
+          <Grid columns={2} gap="medium">
+            <Input label="Full name" required placeholder="Jordan Ellis" value={form.recipientName} error={errors.recipientName} onChange={update('recipientName')} />
+            <Input label="Email address" required type="email" placeholder="jordan.ellis@example.com" value={form.recipientEmail} error={errors.recipientEmail} onChange={update('recipientEmail')} />
+          </Grid>
+          <Input label="First day of work" required type="date" value={form.startDate} error={errors.startDate} onChange={update('startDate')} description="Section 1 must be completed by this date." />
+        </Stack>
+        <Stack gap="medium">
+          <Text size="md" weight="semibold">Employer representative</Text>
+          <Grid columns={2} gap="medium">
+            <Input label="Full name" required placeholder="Priya Raman" value={form.employerName} error={errors.employerName} onChange={update('employerName')} />
+            <Input label="Email address" required type="email" placeholder="priya.raman@example.com" value={form.employerEmail} error={errors.employerEmail} onChange={update('employerEmail')} />
+          </Grid>
+        </Stack>
+        <Input label="Message to the employee" multiline rows={3} placeholder="Welcome to the team. Please complete this form before your first day." value={form.message} onChange={update('message')} />
+        <Select label="Link expires after" value={form.expiresInDays} onChange={update('expiresInDays')}>{['3', '7', '14'].map(days => <option key={days} value={days}>{days} days</option>)}</Select>
+      </Stack> : <Stack gap="medium">
+        <Text size="sm" color="secondary">Check the details below. The employee receives a secure link by email.</Text>
+        <Grid columns={2} gap="medium">
+          {([['Sender', 'Akshat Mishra'], ['Employee', `${form.recipientName} · ${form.recipientEmail}`], ['First day of work', formatLongDate(form.startDate)], ['Employer representative', `${form.employerName} · ${form.employerEmail}`], ['Link expires', `${form.expiresInDays} days after sending`], ['Message', form.message || 'No message']] as const).map(([label, value]) =>
+            <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value}</Text></Stack>)}
+        </Grid>
+      </Stack>}
+    </Stack>
+  </Modal>;
+}
+
+function I9Journey({ session, setSession, onExit, onFinish }: {
+  session: I9Session; setSession: React.Dispatch<React.SetStateAction<I9Session | null>>; onExit: () => void; onFinish: (completed: boolean) => void;
+}) {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [confirmExit, setConfirmExit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const expired = demoFlag('i9') === 'expired';
+  const { step, personal, authorization } = session;
+  const legalName = `${personal.firstName} ${personal.lastName}`.trim();
+  const completed = step === I9_STEPS.length - 1;
+
+  const patch = (change: Partial<I9Session>) => setSession(current => current ? { ...current, ...change } : current);
+  const patchPersonal = (key: keyof I9Session['personal']) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    patch({ personal: { ...personal, [key]: event.target.value } });
+    setErrors(current => ({ ...current, [key]: '' }));
+  };
+  const go = (next: number) => { setErrors({}); setSubmitError(false); patch({ step: next }); };
+
+  const validatePersonal = () => {
+    const next: Record<string, string> = {};
+    if (!personal.firstName.trim()) next.firstName = 'Enter your first name.';
+    if (!personal.lastName.trim()) next.lastName = 'Enter your last name.';
+    if (!personal.dob) next.dob = 'Enter your date of birth.';
+    else if (new Date(`${personal.dob}T00:00:00`) >= new Date()) next.dob = 'Date of birth must be in the past.';
+    if (!personal.address.trim()) next.address = 'Enter your street address.';
+    if (!personal.city.trim()) next.city = 'Enter your city.';
+    if (!personal.state) next.state = 'Choose a state.';
+    if (!/^\d{5}$/.test(personal.zip)) next.zip = 'Enter a 5-digit ZIP code.';
+    if (!EMAIL_PATTERN.test(personal.email)) next.email = 'Enter a valid email address.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const validateAuthorization = () => {
+    const next: Record<string, string> = {};
+    if (!authorization.status) next.status = 'Choose the option that describes you.';
+    if ((authorization.status === 'permanent' || authorization.status === 'authorized') && !/^A?-?\d{7,9}$/i.test(authorization.aNumber.trim())) next.aNumber = 'Enter your A-Number, like A123456789.';
+    if (authorization.status === 'authorized') {
+      if (!authorization.expires) next.expires = 'Enter the date your work authorization expires.';
+      else if (new Date(`${authorization.expires}T00:00:00`) <= new Date()) next.expires = 'The expiration date must be in the future.';
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const next = () => {
+    if (step === 1 && !validatePersonal()) return;
+    if (step === 2 && !validateAuthorization()) return;
+    if (step === 3 && !session.attested) { setErrors({ attested: 'Confirm the statement to continue.' }); return; }
+    go(step + 1);
+  };
+  const sign = () => {
+    if (submitting) return;
+    if (session.signature.trim().toLowerCase() !== legalName.toLowerCase()) { setErrors({ signature: `Type your name exactly as shown: ${legalName}` }); return; }
+    setErrors({}); setSubmitError(false); setSubmitting(true);
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      setSubmitting(false);
+      if (demoFlag('i9') === 'error' && attempts.current === 1) { setSubmitError(true); return; }
+      setSession(current => current ? { ...current, step: 5, submittedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }) } : current);
+    }, 1000);
+  };
+  const requestExit = () => (expired || completed) ? onFinish(completed) : setConfirmExit(true);
+
+  const footer = expired ? <Button kind="primary" onClick={() => onFinish(false)}>Close</Button>
+    : completed ? <Button kind="primary" onClick={() => onFinish(true)}>Done</Button>
+    : <>{step > 0 ? <Button kind="secondary" onClick={() => go(step - 1)} disabled={submitting}>Back</Button> : <span />}
+      {step === 4 ? <Button kind="primary" loading={submitting} onClick={sign}>Sign and submit</Button> : <Button kind="primary" onClick={next}>{step === 0 ? 'Get started' : step === 3 ? 'Continue to sign' : 'Continue'}</Button>}</>;
+
+  const summary = (rows: [string, string][]) => <Grid columns={2} gap="medium">{rows.map(([label, value]) => <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value || 'Not provided'}</Text></Stack>)}</Grid>;
+  const authorizationLabel = I9_AUTHORIZATION_OPTIONS.find(option => option.value === authorization.status)?.label ?? '';
+
+  return <>
+    <JourneyShell title="Form I-9, Section 1" subtitle={`Employment Eligibility Verification · from ${session.employerName}`} steps={I9_STEPS} activeIndex={step} onExit={requestExit} footer={footer} hideProgress={expired}>
+      {expired ? <Stack gap="large">
+        <JourneyHeading title="This link has expired" description={`For security, this link expired ${session.expiresInDays} days after it was sent. Your answers weren’t submitted.`} />
+        <Alert kind="warning" title="Ask for a new link">Contact {session.employerName} at {session.employerEmail} and ask them to send Form I-9 again.</Alert>
+      </Stack> : step === 0 ? <Stack gap="large">
+        <JourneyHeading title={`Welcome${session.recipientName ? `, ${session.recipientName.split(' ')[0]}` : ''}`} description="Federal law requires every new employee to confirm they can work in the United States. This takes about 10 minutes." />
+        {session.message && <Alert kind="information" title={`A note from ${session.employerName}`}>{session.message}</Alert>}
+        <Card radius="small"><Card.Header><Text size="md" weight="semibold">Have these ready</Text></Card.Header><Card.Body><Stack gap="small">
+          <Text size="sm">Your legal name and date of birth</Text><Text size="sm">Your current home address</Text><Text size="sm">Your A-Number, if you are not a U.S. citizen</Text>
+        </Stack></Card.Body></Card>
+        <Text size="sm" color="secondary">You don’t need to upload documents here. {session.employerName} will review your documents in person within 3 business days of {formatLongDate(session.startDate)}.</Text>
+      </Stack> : step === 1 ? <Stack gap="large">
+        <JourneyHeading title="Personal information" description="Enter your details exactly as they appear on your identity documents." />
+        <Grid columns={2} gap="medium">
+          <Input label="First name" required autoComplete="given-name" value={personal.firstName} error={errors.firstName} onChange={patchPersonal('firstName')} />
+          <Input label="Last name" required autoComplete="family-name" value={personal.lastName} error={errors.lastName} onChange={patchPersonal('lastName')} />
+        </Grid>
+        <Input label="Other last names used" value={personal.otherNames} onChange={patchPersonal('otherNames')} description="Optional. Include maiden names." />
+        <Input label="Date of birth" required type="date" autoComplete="bday" value={personal.dob} error={errors.dob} onChange={patchPersonal('dob')} />
+        <Input label="Street address" required autoComplete="street-address" value={personal.address} error={errors.address} onChange={patchPersonal('address')} />
+        <Grid columns={3} gap="medium">
+          <Input label="City" required autoComplete="address-level2" value={personal.city} error={errors.city} onChange={patchPersonal('city')} />
+          <Select label="State" required value={personal.state} error={errors.state} onChange={patchPersonal('state')}><option value="">Select</option>{US_STATES.map(code => <option key={code} value={code}>{code}</option>)}</Select>
+          <Input label="ZIP code" required inputMode="numeric" autoComplete="postal-code" value={personal.zip} error={errors.zip} onChange={patchPersonal('zip')} />
+        </Grid>
+        <Grid columns={2} gap="medium">
+          <Input label="Email address" required type="email" autoComplete="email" value={personal.email} error={errors.email} onChange={patchPersonal('email')} />
+          <Input label="Phone number" type="tel" autoComplete="tel" value={personal.phone} onChange={patchPersonal('phone')} description="Optional." />
+        </Grid>
+      </Stack> : step === 2 ? <Stack gap="large">
+        <JourneyHeading title="Work authorization" description="I attest, under penalty of perjury, that I am:" />
+        <fieldset className="journey-fieldset" aria-describedby={errors.status ? 'i9-status-error' : undefined}>
+          <legend className="sr-only">Citizenship and work authorization status</legend>
+          <Stack gap="medium">
+            {I9_AUTHORIZATION_OPTIONS.map(option => <Radio key={option.value} name="i9-status" label={option.label} description={option.description} checked={authorization.status === option.value}
+              onChange={() => { patch({ authorization: { ...authorization, status: option.value } }); setErrors({}); }} />)}
+            {errors.status && <Text size="sm" color="error"><span id="i9-status-error">{errors.status}</span></Text>}
+          </Stack>
+        </fieldset>
+        {(authorization.status === 'permanent' || authorization.status === 'authorized') && <Input label="A-Number" required value={authorization.aNumber} error={errors.aNumber} placeholder="A123456789" onChange={event => { patch({ authorization: { ...authorization, aNumber: event.target.value } }); setErrors(current => ({ ...current, aNumber: '' })); }} />}
+        {authorization.status === 'authorized' && <Input label="Work authorization expires" required type="date" value={authorization.expires} error={errors.expires} onChange={event => { patch({ authorization: { ...authorization, expires: event.target.value } }); setErrors(current => ({ ...current, expires: '' })); }} />}
+      </Stack> : step === 3 ? <Stack gap="large">
+        <JourneyHeading title="Review your answers" description="Make sure everything is correct before you sign." />
+        <Card radius="small"><Card.Header><Inline justify="between" align="center"><Text size="md" weight="semibold">Personal information</Text><Button kind="tertiary" size="small" onClick={() => go(1)}>Edit</Button></Inline></Card.Header><Card.Body>
+          {summary([['Name', legalName], ['Date of birth', formatLongDate(personal.dob)], ['Address', `${personal.address}, ${personal.city}, ${personal.state} ${personal.zip}`], ['Email', personal.email], ['Phone', personal.phone], ['Other last names', personal.otherNames]])}
+        </Card.Body></Card>
+        <Card radius="small"><Card.Header><Inline justify="between" align="center"><Text size="md" weight="semibold">Work authorization</Text><Button kind="tertiary" size="small" onClick={() => go(2)}>Edit</Button></Inline></Card.Header><Card.Body>
+          {summary([['Status', authorizationLabel], ...(authorization.aNumber ? [['A-Number', authorization.aNumber] as [string, string]] : []), ...(authorization.expires ? [['Expires', formatLongDate(authorization.expires)] as [string, string]] : [])])}
+        </Card.Body></Card>
+        <Checkbox label="I attest, under penalty of perjury, that the information I provided is true and correct." checked={session.attested} error={!!errors.attested} errorMessage={errors.attested} showErrorMessage
+          onChange={event => { patch({ attested: event.target.checked }); setErrors({}); }} />
+      </Stack> : step === 4 ? <Stack gap="large">
+        <JourneyHeading title="Sign Section 1" description="Type your full legal name to sign this form electronically." />
+        {submitError && <Alert kind="danger" title="We couldn’t submit your form" action={{ label: 'Try again', onClick: sign }}>Something went wrong on our side. Your answers are saved.</Alert>}
+        <Input label="Type your full legal name" required autoComplete="off" value={session.signature} error={errors.signature} description={`Must match: ${legalName}`} onChange={event => { patch({ signature: event.target.value }); setErrors({}); }} />
+        <Input label="Date signed" value={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} readOnly />
+      </Stack> : <Stack gap="large">
+        <JourneyHeading title="Section 1 is complete" description={`Thank you, ${personal.firstName}. Your form was submitted on ${session.submittedAt}.`} />
+        <Alert kind="success" title="What happens next">{session.employerName} will review your identity documents in person within 3 business days of {formatLongDate(session.startDate)} and complete Section 2.</Alert>
+        <Card radius="small"><Card.Header><Text size="md" weight="semibold">Bring these documents on your first day</Text></Card.Header><Card.Body><Stack gap="small">
+          <Text size="sm">One document from List A, such as a U.S. passport, or</Text><Text size="sm">One document from List B and one from List C, such as a driver’s license and a Social Security card</Text>
+        </Stack></Card.Body></Card>
+      </Stack>}
+    </JourneyShell>
+    {confirmExit && <Modal open size="small" title="Exit this form?" onClose={() => setConfirmExit(false)}
+      footer={<Inline justify="end" gap="small"><Button kind="tertiary" onClick={() => onFinish(false)}>Discard answers</Button><Button kind="secondary" onClick={() => setConfirmExit(false)}>Keep going</Button><Button kind="primary" onClick={() => { setConfirmExit(false); onExit(); }}>Save and exit</Button></Inline>}>
+      <Text size="md">Your answers are saved. You can resume from Templates.</Text>
+    </Modal>}
+  </>;
+}
+
 function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate }: {
   view: TemplatesSidebarView; onNavigate: (view: TemplatesSidebarView) => void; search: string; onSearchChange: (value: string) => void;
   items: TemplateItem[]; onItemsChange: React.Dispatch<React.SetStateAction<TemplateItem[]>>; editor: TemplateEditorState | null;
@@ -1062,13 +2387,14 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const [notice, setNotice] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(25);
+  const [i9Template, setI9Template] = useState<TemplateItem | null>(null);
+  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'journey'>('closed');
+  const [i9Session, setI9Session] = useState<I9Session | null>(null);
   const kind = templateKindForView(view);
-  const isGallery = view === 'template-gallery';
   const isEnvelope = ['my-templates', 'shared-with-me', 'favorites', 'all-templates'].includes(view);
   useEffect(() => { setPage(1); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); setNotice(''); }, [view]);
   useEffect(() => { setPage(1); }, [search, status, dateRange, advancedFilters]);
   const viewTemplates = items.filter(item => {
-    if (isGallery) return (item.status ?? 'Published') === 'Published';
     if ((item.kind ?? 'envelope') !== kind) return false;
     if (view === 'my-templates' || view === 'my-web-forms') return item.owner === 'Akshat Mishra';
     if (view === 'shared-with-me' || view === 'shared-web-forms') return item.shared && item.owner !== 'Akshat Mishra';
@@ -1102,7 +2428,8 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   };
   const useTemplate = (item: TemplateItem) => {
     setPreview(null);
-    if ((item.kind ?? 'envelope') === 'envelope' || item.kind === 'workflow') onUseTemplate(item);
+    if (item.journey === 'i9') { setI9Template(item); setI9Phase('setup'); }
+    else if ((item.kind ?? 'envelope') === 'envelope' || item.kind === 'workflow') onUseTemplate(item);
     else duplicate(item);
   };
   const columns: DataTableColumn<TemplateItem>[] = [
@@ -1129,7 +2456,13 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const list = <AgreementTableView
     paddingVariant={isEnvelope ? 'compact' : 'default'}
     pageHeader={<PageHeader title={TEMPLATE_VIEW_LABELS[view]} actions={isEnvelope ? undefined : <Button kind="primary" startElement={<Icon name="plus" size="small" />} onClick={() => onEditorChange({ kind })}>Create {TEMPLATE_KINDS[kind].label.toLowerCase()}</Button>} />}
-    banner={notice ? <Banner kind="success" closable onClose={() => setNotice('')}>{notice}</Banner> : undefined}
+    banner={notice ? <Banner kind="success" closable onClose={() => setNotice('')}>{notice}</Banner>
+      : i9Session && i9Phase === 'closed' ? <Banner kind="information">
+        <Inline gap="medium" align="center" wrap>
+          <span>{`Form I-9 for ${i9Session.recipientName} is in progress (step ${i9Session.step + 1} of ${I9_STEPS.length}).`}</span>
+          <Button kind="secondary" size="small" onClick={() => setI9Phase('journey')}>Resume</Button>
+        </Inline>
+      </Banner> : undefined}
     filterBar={<FilterBar className={isEnvelope ? 'template-list-filters' : undefined} search={{ value: search, onChange: onSearchChange, placeholder: `Search ${TEMPLATE_VIEW_LABELS[view]}` }} filters={<Inline gap="small">
       {isEnvelope ? <>
         <Dropdown items={['Any time', 'Last 30 days', 'Last 90 days', 'This year'].map(value => ({ label: value, selected: dateRange === value, onClick: () => setDateRange(value) }))}><Button kind="secondary" size="small" menuTrigger>{dateRange === 'Any time' ? 'Date' : dateRange}</Button></Dropdown>
@@ -1142,19 +2475,23 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     </Inline>} />}
   >
     <Stack gap="medium">
-    {!isEnvelope && <Text size="sm" color="secondary">{isGallery ? 'Find a starting point, then customize a copy for your team.' : TEMPLATE_KINDS[kind].description}</Text>}
-    {isGallery ? <Grid columns="auto" gap="medium">{filteredTemplates.map(item => <Card key={item.id} radius="large">
-      {item.document ? <Card.Image src={templateDocumentUrl(item, 1)} alt={`First page of ${item.name}`} imageSpacing="document-preview" ratio="1:1" /> : <Card.Header><Inline justify="between"><Icon name={TEMPLATE_KINDS[item.kind ?? 'envelope'].icon} size="medium" /><Badge kind="subtle" text={TEMPLATE_KINDS[item.kind ?? 'envelope'].label} /></Inline></Card.Header>}
-      <Card.Body><Stack gap="small"><Text size="md" weight="semibold">{item.name}</Text><Text size="sm" color="secondary">{item.description}</Text></Stack></Card.Body>
-      <Card.Footer><Button kind="secondary" size="small" onClick={() => setPreview(item)}>Preview template</Button></Card.Footer>
-    </Card>)}</Grid> : <DataTable className="template-list-table" columns={columns} data={filteredTemplates.slice((page - 1) * pageSize, page * pageSize)} getRowKey={item => item.id} selectable stickyHeader showColumnControl rowHeight="tall" onRowClick={setPreview} emptyMessage="No templates match your search" pagination={{ page, pageSize, totalItems: filteredTemplates.length, onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1); }, showInfo: true }} />}
-    {isGallery && filteredTemplates.length === 0 && <EmptyState header={<EmptyState.Header text="No templates found" />} callToAction={<Button kind="secondary" onClick={() => onSearchChange('')}>Clear search</Button>}>Try another name or agreement type.</EmptyState>}
+    {!isEnvelope && <Text size="sm" color="secondary">{TEMPLATE_KINDS[kind].description}</Text>}
+    <DataTable className="template-list-table" columns={columns} data={filteredTemplates.slice((page - 1) * pageSize, page * pageSize)} getRowKey={item => item.id} selectable stickyHeader showColumnControl rowHeight="tall" onRowClick={setPreview} emptyMessage="No templates match your search" pagination={{ page, pageSize, totalItems: filteredTemplates.length, onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1); }, showInfo: true }} />
     </Stack>
   </AgreementTableView>;
   return <>
     {(isEnvelope || view === 'elastic-templates') ? <Tabs className="template-screen-tabs" value={view === 'elastic-templates' ? 'elastic-template-list' : 'envelope-template-list'} onChange={tab => { onSearchChange(''); onNavigate(tab === 'elastic-template-list' ? 'elastic-templates' : 'my-templates'); }} tabs={[
       { id: 'envelope-template-list', label: 'Templates', content: list }, { id: 'elastic-template-list', label: 'Elastic Templates', content: list },
     ]} /> : list}
+    {i9Phase === 'setup' && i9Template && <I9SetupDialog template={i9Template} onCancel={() => setI9Phase('closed')} onStart={setup => {
+      setI9Session({ ...setup, step: 0, personal: { firstName: '', lastName: '', otherNames: '', dob: '', address: '', city: '', state: '', zip: '', email: setup.recipientEmail, phone: '' }, authorization: { status: '', aNumber: '', expires: '' }, attested: false, signature: '' });
+      setI9Phase('journey');
+    }} />}
+    {i9Phase === 'journey' && i9Session && <I9Journey session={i9Session} setSession={setI9Session} onExit={() => setI9Phase('closed')} onFinish={completed => {
+      setI9Phase('closed');
+      if (completed) setNotice(`Form I-9 Section 1 was submitted by ${i9Session.recipientName}. ${i9Session.employerName} will complete Section 2.`);
+      setI9Session(null);
+    }} />}
     {showAdvancedSearch && <Modal open onClose={() => setShowAdvancedSearch(false)} title="Advanced search" size="medium" footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => setShowAdvancedSearch(false)}>Cancel</Button><Button kind="primary" onClick={() => { setAdvancedFilters(advancedDraft); setShowAdvancedSearch(false); }}>Apply filters</Button></Inline>}>
       <Stack gap="medium">
         <Input label="Owner" placeholder="Search by owner name" value={advancedDraft.owner} onChange={event => setAdvancedDraft(current => ({ ...current, owner: event.target.value }))} />
@@ -1169,7 +2506,11 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
       <Stack gap="large">
         <Text size="md">{preview.description}</Text>
         <Grid columns={3} gap="medium"><Stack gap="small"><Text size="xs" color="secondary">Type</Text><Text size="sm">{TEMPLATE_KINDS[preview.kind ?? 'envelope'].label}</Text></Stack><Stack gap="small"><Text size="xs" color="secondary">Owner</Text><Text size="sm">{preview.owner}</Text></Stack><Stack gap="small"><Text size="xs" color="secondary">Last change</Text><Text size="sm">{preview.lastModified}</Text></Stack></Grid>
-        {preview.document ? <TemplateDocumentPages template={preview} /> : <Card radius="small"><Card.Header><Text size="md" weight="semibold">{preview.kind === 'workflow' ? 'Workflow steps' : preview.kind === 'web-form' ? 'Form fields' : preview.kind === 'workspace' ? 'Workspace contents' : 'Template content'}</Text></Card.Header><Card.Body><Stack gap="medium">
+        {preview.journey === 'i9' ? <Card radius="small"><Card.Header><Text size="md" weight="semibold">What’s included</Text></Card.Header><Card.Body><Stack gap="medium">
+          <Text size="sm"><strong>Documents:</strong> Form I-9, Section 1 (employee) and Section 2 (employer review)</Text>
+          <Text size="sm"><strong>Signers:</strong> New hire completes Section 1, then the employer representative completes Section 2</Text>
+          <Text size="sm"><strong>Employee steps:</strong> Instructions, personal information, work authorization, review, sign, complete</Text>
+        </Stack></Card.Body></Card> : preview.document ? <TemplateDocumentPages template={preview} /> : <Card radius="small"><Card.Header><Text size="md" weight="semibold">{preview.kind === 'workflow' ? 'Workflow steps' : preview.kind === 'web-form' ? 'Form fields' : preview.kind === 'workspace' ? 'Workspace contents' : 'Template content'}</Text></Card.Header><Card.Body><Stack gap="medium">
           {preview.kind === 'workflow' ? <><Text size="sm">1. Collect agreement information</Text><Text size="sm">2. Request approval from the team</Text><Text size="sm">3. Send the agreement for signature</Text><Text size="sm">4. Notify the owner when completed</Text></> : preview.kind === 'web-form' ? <><Input label="Full name" placeholder="Enter your name" readOnly /><Input label="Email address" placeholder="name@company.com" readOnly /><Input label="Company" placeholder="Company name" readOnly /></> : preview.kind === 'workspace' ? <><Text size="sm">Agreement documents</Text><Text size="sm">Review and approval tasks</Text><Text size="sm">Shared contacts and activity</Text></> : <><Text size="sm" weight="semibold">{preview.name}</Text><Text size="sm">{preview.kind === 'clause' ? `${preview.description} The parties agree to the terms set out in this agreement, subject to the applicable statement of work and any written amendments.` : 'This template includes reusable agreement content. Add the parties, review the terms, and prepare a copy for your next agreement.'}</Text><Text size="xs" color="secondary">Prepared for Protolab · {preview.lastModified}</Text></>}
         </Stack></Card.Body></Card>}
       </Stack>
@@ -1177,7 +2518,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   </>;
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════��══════════
    Insights Reports Data
    ═══════════════════════════════════════ */
 
@@ -1888,7 +3229,7 @@ function InsightsPage({ view, onNavigate, reports, onReportsChange, creator, onC
    (rendered inline via AgreementTableView)
    ═══════════════════════════════════════ */
 
-/* ═══════════════════════════════════════
+/* ═════════���═════════════════════════════
    Automations and Admin
    ═══════════════════════════════════════ */
 
@@ -3902,7 +5243,7 @@ function RequestDetailView({ request, onClose }: { request: RequestItem; onClose
   );
 }
 
-/* ═══════════════════════════════════════
+/* ═════════════════════════════���══════��══
    Completed → My Insights panel
    Mirrors the production Navigator insights band
    ═══════════════════════════════════════ */
@@ -4038,6 +5379,17 @@ function PrototypeApp() {
   const [accountSettings, setAccountSettings] = useState<AccountSettings>(DEFAULT_ACCOUNT_SETTINGS);
   const [adminView, setAdminView] = useState<AdminView>(ADMIN_DEFAULT_VIEW);
   const [sidebarView, setSidebarView] = useState<SidebarView>('completed');
+  const [organizationsData, setOrganizationsData] = useState<Organization[]>(ORGANIZATIONS_DATA);
+  const [peopleData, setPeopleData] = useState<Person[]>(PEOPLE_DATA);
+
+  const mergePartyRecords = (type: PartiesView, merged: Organization | Person, removedIds: string[]) => {
+    if (type === 'organizations') {
+      const mergedOrg = merged as Organization;
+      setOrganizationsData(organizationsData.filter((org) => !removedIds.includes(org.id)).map((org) => (org.id === merged.id ? mergedOrg : org)));
+    } else {
+      setPeopleData((current) => current.filter((person) => !removedIds.includes(person.id)).map((person) => (person.id === merged.id ? (merged as Person) : person)));
+    }
+  };
   const [templatesSidebarView, setTemplatesSidebarView] = useState<TemplatesSidebarView>('my-templates');
   const [templateItems, setTemplateItems] = useState<TemplateItem[]>(() => [...TEMPLATES_DATA, ...TEMPLATE_RESOURCES_DATA]);
   const [templateEditor, setTemplateEditor] = useState<TemplateEditorState | null>(null);
@@ -4047,6 +5399,7 @@ function PrototypeApp() {
   const [insightReports, setInsightReports] = useState<ReportItem[]>(REPORTS_DATA);
   const [insightCreator, setInsightCreator] = useState<'report' | 'dashboard' | null>(null);
   const [search, setSearch] = useState('');
+  const [completedMode, setCompletedMode] = useState<'documents' | 'envelopes'>('documents');
   const [agreementDateFilter, setAgreementDateFilter] = useState(true);
   const [showAgreementDetail, setShowAgreementDetail] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
@@ -4421,7 +5774,6 @@ function PrototypeApp() {
           { id: 'all-web-forms', label: 'All Web Forms', icon: 'globe-language' as const, nested: true, onClick: () => navigateTemplateView('all-web-forms') },
         ],
       },
-      { id: 'template-gallery', items: [{ id: 'template-gallery', label: 'Template Gallery', icon: 'layout-grid' as const, onClick: () => navigateTemplateView('template-gallery') }] },
     ],
   };
 
@@ -4492,7 +5844,9 @@ function PrototypeApp() {
   };
 
   const isPartiesView = sidebarView.startsWith('parties');
-  const isNavigatorView = sidebarView === 'completed';
+  const isCompletedView = sidebarView === 'completed';
+  const isNavigatorView = isCompletedView && completedMode === 'documents';
+  const completedDocs = useCompletedDocuments(openIris);
   const isRequestsView = sidebarView === 'requests';
   const isWorkspacesView = sidebarView === 'workspaces';
   const isPowerFormsView = sidebarView === 'powerforms';
@@ -4557,7 +5911,14 @@ function PrototypeApp() {
 
   /* ── Agreements content ── */
   const agreementsContent = isPartiesView ? (
-    <PartiesPage key={sidebarView} view={sidebarView === 'parties-people' ? 'people' : 'organizations'} onAskIris={openIris} />
+    <PartiesPage
+      key={sidebarView}
+      view={sidebarView === 'parties-people' ? 'people' : 'organizations'}
+      onAskIris={openIris}
+      organizationsData={organizationsData}
+      peopleData={peopleData}
+      onMerge={mergePartyRecords}
+    />
   ) : (
     <AgreementTableView
       paddingVariant={isEnvelopeListView ? 'compact' : 'default'}
@@ -4567,7 +5928,7 @@ function PrototypeApp() {
         </Banner>
       ) : undefined}
       pageHeader={
-        isNavigatorView ? (
+        isCompletedView ? (
           <Inline align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
             <Inline gap="medium" align="center">
               <Heading level={1} style={{ fontSize: 'var(--ink-font-heading-m-size)', fontWeight: 'var(--ink-font-weight-regular)', color: 'var(--ink-font-default)', margin: 0 }}>
@@ -4577,13 +5938,13 @@ function PrototypeApp() {
                 position="bottom"
                 align="start"
                 items={[
-                  { label: 'Documents', description: 'Analyze agreement data with AI', icon: <Icon name="document" size={18} />, selected: true },
-                  { label: 'Envelopes', description: 'View signatures and activity', icon: <Icon name="envelope" size={18} /> },
+                  { label: 'Documents', description: 'Analyze agreement data with AI', icon: <Icon name="document" size={18} />, selected: isNavigatorView, onClick: () => { setCompletedMode('documents'); setSearch(''); } },
+                  { label: 'Envelopes', description: 'View signatures and activity', icon: <Icon name="envelope" size={18} />, selected: !isNavigatorView, onClick: () => { setCompletedMode('envelopes'); setSearch(''); } },
                 ]}
               >
-                <Button kind="tertiary" size="large" menuTrigger accessibilityText="Select a view" className="navigator-view-trigger">Documents</Button>
+                <Button kind="tertiary" size="large" menuTrigger accessibilityText="Select a view" className="navigator-view-trigger">{isNavigatorView ? 'Documents' : 'Envelopes'}</Button>
               </Dropdown>
-              <AIBadge infoContent={false} style={{ marginLeft: "var(--ink-spacing-50)", flexShrink: 0 }} />
+              {isNavigatorView && <AIBadge infoContent={false} style={{ marginLeft: "var(--ink-spacing-50)", flexShrink: 0 }} />}
             </Inline>
             <Inline gap="small" align="center">
               <ComboButton variant="secondary" size="small" startIcon="plus" compact accessibilityText="Add documents" dropdownLabel="More add document options" />
@@ -4603,7 +5964,7 @@ function PrototypeApp() {
         />
         )
       }
-      filterBar={
+      filterBar={isNavigatorView ? completedDocs.filterBar :
         <FilterBar
           className={isEnvelopeListView ? 'agreement-list-filters' : undefined}
           search={{
@@ -4691,7 +6052,7 @@ function PrototypeApp() {
           </Stack>
         </Inline>
       ) : isNavigatorView ? (
-        <DataTable bordered columns={navigatorColumns} data={filteredNavigator} getRowKey={(row) => row.id} selectable stickyHeader stickyFooter showColumnControl rowHeight="tall" emptyMessage="No completed documents" onRowClick={() => setShowAgreementDetail(true)} pagination={{ page: 1, pageSize: 25, totalItems: 1659, onPageChange: () => {}, onPageSizeChange: () => {}, showInfo: true }} />
+        completedDocs.content
       ) : (
         <DataTable className="agreement-list-table" columns={getAgreementColumns(row => {
           const draft = createdDrafts.find(item => item.id === row.id);
