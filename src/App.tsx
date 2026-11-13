@@ -1730,7 +1730,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
 
 /* ═══════════════════════════════════════
    Requests Data (matches real DocuSign)
-   ══════════════════════════════��═��══════ */
+   ════════════════════════════���═��═��══════ */
 
 interface RequestItem {
   id: string;
@@ -2616,6 +2616,213 @@ function I9DocumentSigning({ session, onClose, onComplete }: {
   </>;
 }
 
+type OneNotaryStage = 'eligibility' | 'av' | 'upload' | 'finding' | 'assigned' | 'session';
+const ONENOTARY_SESSION_DOCUMENTS = ['Form I-9 (Employment Eligibility Verification)', 'U.S. Driver’s License', 'U.S. Social Security Card'];
+const ONENOTARY_TASKS = [
+  { icon: 'id-card', title: 'Prepare Your IDs for Verification', copy: 'Ensure you have an original copy of the same documents you uploaded' },
+  { icon: 'user', title: 'Present Your IDs to the Authorized Representative', copy: 'When prompted, hold your IDs close to the camera for visual inspection. Keep them steady.' },
+  { icon: 'edit', title: 'Verification and Signing', copy: 'The Authorized Representative will examine your documents and complete Form I-9. This process will be recorded on video.' },
+  { icon: 'download', title: 'Employment Eligibility Verification is Complete', copy: 'The verified documents will be available for download.' },
+] as const;
+
+function QrPattern() {
+  const size = 21;
+  const finder = (x: number, y: number) => {
+    const inFinder = (ox: number, oy: number) => x >= ox && x < ox + 7 && y >= oy && y < oy + 7;
+    for (const [ox, oy] of [[0, 0], [size - 7, 0], [0, size - 7]]) {
+      if (inFinder(ox, oy)) {
+        const dx = x - ox, dy = y - oy;
+        return dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4);
+      }
+      if (x >= ox - 1 && x <= ox + 7 && y >= oy - 1 && y <= oy + 7) return false;
+    }
+    return null;
+  };
+  const cells = Array.from({ length: size * size }, (_, index) => {
+    const x = index % size, y = Math.floor(index / size);
+    const fixed = finder(x, y);
+    return fixed ?? ((x * 7 + y * 13 + x * y * 3) % 5 < 2);
+  });
+  return <div className="on-qr" role="img" aria-label="Sample QR code for uploading documents from a phone" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+    {cells.map((on, index) => <span key={index} className={on ? 'is-on' : undefined} />)}
+  </div>;
+}
+
+function OneNotaryStatusRow({ state, children }: { state: 'done' | 'current' | 'pending'; children: React.ReactNode }) {
+  return <li className={`on-status-row is-${state}`}>
+    <span className="on-status-mark" aria-hidden="true">{state === 'done' && <Icon name="check" size="small" />}</span>
+    <span>{children}</span>
+  </li>;
+}
+
+function I9OneNotary({ session, onExit }: { session: I9Session; onExit: () => void }) {
+  const [stage, setStage] = useState<OneNotaryStage>('eligibility');
+  const [agreed, setAgreed] = useState({ docusign: true, onenotary: true });
+  const [waitNotice, setWaitNotice] = useState(false);
+  const titleId = useId();
+  const signerName = session.recipientName || 'Melony Woods';
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+  useEffect(() => {
+    if (stage === 'finding' && !waitNotice) {
+      const id = window.setTimeout(() => setStage('assigned'), 3500);
+      return () => window.clearTimeout(id);
+    }
+    if (stage === 'assigned') {
+      const id = window.setTimeout(() => setStage('session'), 4000);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, [stage, waitNotice]);
+
+  const getReady = stage === 'eligibility' || stage === 'av' || stage === 'upload';
+  const documentLinks = <Stack gap="small">
+    <h2 className="on-section-title">Session Documents</h2>
+    <ul className="on-doc-links">{ONENOTARY_SESSION_DOCUMENTS.map(name => <li key={name}><Link href="#session-documents" size="small" onClick={event => event.preventDefault()}>{name}</Link></li>)}</ul>
+  </Stack>;
+
+  const sessionView = <div className="journey-shell on-shell on-session" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <header className="on-session-bar">
+      <Inline gap="medium" align="center">
+        <img className="on-docusign-logo" src="/docusign-logo.svg" alt="Docusign" />
+        <span className="on-session-title" id={titleId}>Employment Eligibility Verification // Recording (2 people)</span>
+      </Inline>
+      <Button kind="secondary" size="small" onClick={onExit}>Exit Session</Button>
+    </header>
+    <div className="on-session-body">
+      <main className="on-task-list">
+        <h1 className="sr-only">Verification session in progress</h1>
+        <ol>{ONENOTARY_TASKS.map((task, index) => <li key={task.title} className="on-task">
+          <span className={`on-task-tile is-tone-${index}`}><span className="on-task-number">{String(index + 1).padStart(2, '0')}</span><Icon name={task.icon} size={32} /></span>
+          <div><h2 className="on-task-title">{task.title}</h2><p className="on-task-copy">{task.copy}</p></div>
+        </li>)}</ol>
+      </main>
+      <aside className="on-video-panel" aria-label="Participants">
+        <figure className="on-video is-verifier">
+          <figcaption><span><strong>Verifier</strong> Allison O.</span><Inline gap="xs"><Icon name="video-camera" size="small" /><Icon name="microphone" size="small" /></Inline></figcaption>
+          <img src="/onenotary-verifier.png" alt="Verifier Allison O. on video, wearing headphones" />
+        </figure>
+        <figure className="on-video is-signer">
+          <figcaption><span><strong>Signer</strong> {signerName}</span><Inline gap="xs"><Icon name="video-camera" size="small" /><Icon name="microphone" size="small" /></Inline></figcaption>
+          <img src="/onenotary-signer.png" alt={`Signer ${signerName} on video`} />
+        </figure>
+      </aside>
+    </div>
+  </div>;
+
+  const requestShell = <div className="journey-shell on-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <header className="on-header"><span className="on-wordmark">OneNotary</span></header>
+    <div className="on-test-strip" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <span key={index}>TEST NOTARIZATION</span>)}</div>
+    <main className="on-main">
+      <h1 className="on-title" id={titleId}>Verification Request 123ABC</h1>
+      <div className="on-card">
+        <ol className="on-steps" aria-label="Verification progress">
+          <li className={getReady ? 'is-active' : 'is-complete'} aria-current={getReady ? 'step' : undefined}>
+            <span className="on-step-icon"><Icon name="id-card" size={32} />{!getReady && <span className="on-step-badge is-done"><Icon name="check" size="small" /></span>}</span>
+            <span>1. Get Ready</span>
+          </li>
+          <li className={getReady ? undefined : 'is-active'} aria-current={getReady ? undefined : 'step'}>
+            <span className="on-step-icon"><Icon name="video-camera" size={32} /></span>
+            <span>2. Meet Representative</span>
+          </li>
+        </ol>
+        <div className="on-card-body">
+          {getReady && <Stack gap="large">
+            <h2 className="on-section-title is-large">Upload your employment authorization documents</h2>
+            <div className="on-upload-panel">
+              <div className="on-upload-visual"><QrPattern /><span className="on-phone" aria-hidden="true"><Icon name="camera" size={32} /></span></div>
+              <p>Scan this QR code with your smartphone, and follow the instructions to capture your ID.</p>
+              <p>Once your documents captured, please return to this screen.</p>
+            </div>
+            <div><Button kind="secondary" onClick={() => { setWaitNotice(true); setStage('finding'); }}>Upload file</Button></div>
+          </Stack>}
+          {!getReady && <Stack gap="large">
+            <section className={`on-status-card${stage === 'assigned' ? ' is-assigned' : ''}`} aria-live="polite">
+              <div className="on-status-banner">
+                {stage === 'finding' ? <div>
+                  <h2 className="on-banner-title">Finding an I-9 verifier…</h2>
+                  <p className="on-banner-lead">Wait time is about 1 minute</p>
+                  <p className="on-banner-note">Please keep this screen open and your volume turned up.</p>
+                </div> : <div>
+                  <div className="on-verifier-id"><img src="/onenotary-verifier.png" alt="" /><h2 className="on-banner-title">Your verifier<br />Allison O.</h2></div>
+                  <p className="on-banner-lead">is getting ready to start</p>
+                  <p className="on-banner-note">Please keep this screen open and your volume turned up.</p>
+                </div>}
+                {stage === 'finding' ? <img className="on-banner-art" src="/onenotary-map.png" alt="" /> : <span className="on-banner-art is-icon" aria-hidden="true"><Icon name="video-camera" size={32} /></span>}
+              </div>
+              <ul className="on-status-list">
+                <OneNotaryStatusRow state="done">{signerName} – Ready to Start</OneNotaryStatusRow>
+                {stage === 'finding'
+                  ? <><OneNotaryStatusRow state="current"><strong>Finding a verifier.</strong> Typical waiting time is ~1 minute</OneNotaryStatusRow><OneNotaryStatusRow state="pending">Verifier starts the video call</OneNotaryStatusRow></>
+                  : <><OneNotaryStatusRow state="done">Verifier Allison O. is assigned to your request</OneNotaryStatusRow><OneNotaryStatusRow state="current"><strong>Verifier is about to start</strong> the video call.</OneNotaryStatusRow></>}
+              </ul>
+            </section>
+            {stage === 'assigned' && <div><Button kind="primary" onClick={() => setStage('session')}>Start verification</Button></div>}
+            {documentLinks}
+          </Stack>}
+        </div>
+      </div>
+    </main>
+    <footer className="on-footer">
+      <Inline gap="small" align="center"><img className="on-docusign-logo" src="/docusign-logo.svg" alt="Docusign" /><span className="on-footer-partner">OneNotary</span></Inline>
+      <Inline gap="large" align="center"><span>Terms of Service</span><span>Copyright © 2025 OneNotary Inc.</span></Inline>
+    </footer>
+  </div>;
+
+  return <>
+    {createPortal(stage === 'session' ? sessionView : requestShell, document.body)}
+    {stage === 'eligibility' && <Modal open size="medium" aria-label="Form I-9 Verification is requested" closeOnBackdropClick={false} closeOnEscape={false}
+      footer={<Button kind="primary" fullWidth disabled={!agreed.docusign || !agreed.onenotary} onClick={() => setStage('av')}>Continue</Button>}>
+      <Stack gap="large" align="center">
+        <h2 className="on-modal-title">Form I-9 Verification is requested</h2>
+        <Text size="md">Here is how it works</Text>
+        <ol className="on-how">{[{ icon: 'id-card', label: 'Confirm your identity' }, { icon: 'video-camera', label: 'Meet the representative' }, { icon: 'camera', label: 'Show your ID on video' }].map((item, index) => <li key={item.label}>
+          <span className="on-how-circle"><span className="on-how-number">{index + 1}</span><Icon name={item.icon} size={32} /></span>
+          <Text size="md">{item.label}</Text>
+        </li>)}</ol>
+        <Stack gap="medium">
+          <div className="on-consent">
+            <Checkbox checked={agreed.docusign} showLabel={false} label="I agree to the Docusign Terms of Service and Privacy Policy" onChange={event => setAgreed(current => ({ ...current, docusign: event.target.checked }))} />
+            <span>I agree to the Docusign <Link href="#terms" size="small" onClick={event => event.preventDefault()}>Terms of Service</Link> and <Link href="#privacy" size="small" onClick={event => event.preventDefault()}>Privacy Policy</Link> and allow Docusign to collect my personal information provided in the online Form I-9 Verification.</span>
+          </div>
+          <div className="on-consent">
+            <Checkbox checked={agreed.onenotary} showLabel={false} label="I agree to the OneNotary Terms of Service" onChange={event => setAgreed(current => ({ ...current, onenotary: event.target.checked }))} />
+            <span>I agree to the <Link href="#onenotary-terms" size="small" onClick={event => event.preventDefault()}>OneNotary Terms of Service</Link> and I understand that online Form I-9 Verification is legally binding.</span>
+          </div>
+        </Stack>
+      </Stack>
+    </Modal>}
+    {stage === 'av' && <Modal open size="small" aria-label="Audio/Video Check" closeOnBackdropClick={false} closeOnEscape={false}
+      footer={<Button kind="primary" fullWidth onClick={() => setStage('upload')}>Save and Continue</Button>}>
+      <Stack gap="large">
+        <h2 className="on-modal-title">Audio/Video Check</h2>
+        <figure className="on-preview"><img src="/onenotary-signer.png" alt="Camera preview of the signer" /><figcaption>All good!</figcaption></figure>
+        <div className="on-checks">
+          <ul>{[{ icon: 'signal', label: 'Connection' }, { icon: 'video-camera', label: 'Camera' }, { icon: 'microphone', label: 'Microphone' }, { icon: 'volume-high', label: 'Speakers' }].map(item => <li key={item.label}>
+            <span className="on-check-icon"><Icon name={item.icon} size="medium" /><span className="on-check-badge" aria-hidden="true"><Icon name="check" size="small" /></span></span>
+            <span className="sr-only">{`${item.label} is working`}</span>
+          </li>)}</ul>
+          <Button kind="secondary" size="small">Settings</Button>
+        </div>
+      </Stack>
+    </Modal>}
+    {stage === 'finding' && waitNotice && <Modal open size="small" aria-label="All set! Wait for a notary" closeOnBackdropClick={false} closeOnEscape={false}
+      footer={<Button kind="primary" fullWidth onClick={() => setWaitNotice(false)}>Got It</Button>}>
+      <Stack gap="medium" align="center">
+        <h2 className="on-modal-title is-small">All Set! Wait for a Notary</h2>
+        <span className="on-wait-art" aria-hidden="true"><Icon name="volume-high" size={32} /></span>
+        <p className="on-wait-strong">Please keep this screen open and your volume turned up.</p>
+        <p className="on-wait-copy">We’ll notify you with a sound when the notary starts the session.</p>
+        <p className="on-wait-copy">We’re working hard to let people in as quickly as possible, so thank you for your patience.</p>
+      </Stack>
+    </Modal>}
+  </>;
+}
+
 function I9DocumentFields({ listKey, value, errors, onChange }: {
   listKey: 'a' | 'b' | 'c'; value: I9Document; errors: Record<string, string>; onChange: (change: Partial<I9Document>) => void;
 }) {
@@ -2746,7 +2953,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(25);
   const [i9Template, setI9Template] = useState<TemplateItem | null>(null);
-  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'email' | 'signing' | 'section2'>('closed');
+  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'email' | 'signing' | 'onenotary' | 'section2'>('closed');
   const [i9Session, setI9Session] = useState<I9Session | null>(null);
   const [i9Pending, setI9Pending] = useState<I9Session | null>(null);
   const kind = templateKindForView(view);
@@ -2849,9 +3056,15 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     {i9Phase === 'email' && i9Session && <I9EmailNotification session={i9Session} onReview={() => setI9Phase('signing')} onClose={() => { setI9Phase('closed'); setI9Session(null); }} />}
     {i9Phase === 'signing' && i9Session && <I9DocumentSigning session={i9Session} onClose={() => { setI9Phase('closed'); setI9Session(null); }} onComplete={(signed, action) => {
       setI9Pending(signed);
+      if (action === 'verify') { setI9Session(signed); setI9Phase('onenotary'); return; }
       setI9Session(null);
       setI9Phase('closed');
-      setNotice(action === 'verify' ? `${signed.recipientName} signed Form I-9. Identity verification is the next step.` : `${signed.recipientName} signed Form I-9 and can continue verification from the email link.`);
+      setNotice(`${signed.recipientName} signed Form I-9 and can continue verification from the email link.`);
+    }} />}
+    {i9Phase === 'onenotary' && i9Session && <I9OneNotary session={i9Session} onExit={() => {
+      setNotice(`${i9Session.recipientName} completed identity verification for Form I-9.`);
+      setI9Session(null);
+      setI9Phase('closed');
     }} />}
     {i9Phase === 'section2' && i9Pending && <I9Section2Journey session={i9Pending} setSession={setI9Pending} onExit={() => setI9Phase('closed')} onFinish={completed => {
       setI9Phase('closed');
