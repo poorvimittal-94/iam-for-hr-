@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useId, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import powerFormsEmptyArt from '@/assets/powerforms-empty.svg';
 import {
   DocuSignShell,
@@ -253,7 +254,7 @@ type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | '
 type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'template-gallery' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ════════════════════════���══════════════
+/* ════════════════════════����══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -1894,6 +1895,7 @@ interface TemplateItem {
   kind?: TemplateLibraryKind;
   status?: 'Published' | 'Draft';
   document?: { slug: string; pageCount: number };
+  journey?: 'i9';
 }
 
 type TemplateLibraryKind = 'envelope' | 'clause' | 'document' | 'workspace' | 'workflow' | 'web-form' | 'elastic';
@@ -1937,6 +1939,7 @@ const TEMPLATES_DATA: TemplateItem[] = [
   { id: '8', name: 'Vendor Onboarding', description: 'New vendor setup and compliance form', owner: 'Procurement', lastModified: '12/08/2025', shared: true, uses: 45, favorited: false },
   { id: '9', name: 'Employment Agreement', description: 'Full-time employment agreement', owner: 'HR Department', lastModified: '03/01/2026', shared: true, uses: 178, favorited: false },
   { id: '10', name: 'Change Order', description: 'Amendment to existing SOW or contract', owner: 'Akshat Mishra', lastModified: '03/22/2026', shared: false, uses: 3, favorited: false },
+  { id: 'i9', name: 'Form I-9: Employment Eligibility Verification', description: 'Verify identity and work authorization for every new hire. The employee completes Section 1, then your team completes Section 2.', owner: 'People Team', lastModified: '10/23/2026', shared: true, uses: 31, favorited: true, journey: 'i9' },
 ];
 
 function templateDocumentUrl(template: TemplateItem, page?: number) {
@@ -2032,6 +2035,344 @@ function TemplateEditorDialog({ editor, onClose, onSave }: { editor: TemplateEdi
   </Modal>;
 }
 
+/* ═══════════════════════════════════════
+   Journey shell + I-9 envelope setup + signer journey
+   Shell decision: a focused full-screen layer (portal, aria-modal) with a
+   Stepper, scrollable body and sticky footer. It sits above the product shell
+   and returns focus to its opener. Reusable by any multi-step signer flow.
+   Demo states: ?i9=setup-error | ?i9=error | ?i9=expired
+   ═══════════════════════════════════════ */
+
+interface I9Setup { recipientName: string; recipientEmail: string; startDate: string; employerName: string; employerEmail: string; message: string; expiresInDays: string; }
+interface I9Session extends I9Setup {
+  step: number;
+  personal: { firstName: string; lastName: string; otherNames: string; dob: string; address: string; city: string; state: string; zip: string; email: string; phone: string };
+  authorization: { status: '' | 'citizen' | 'national' | 'permanent' | 'authorized'; aNumber: string; expires: string };
+  attested: boolean; signature: string; submittedAt?: string;
+}
+
+const I9_STEPS = [
+  { id: 'instructions', title: 'Instructions' }, { id: 'personal', title: 'Personal information' }, { id: 'authorization', title: 'Work authorization' },
+  { id: 'review', title: 'Review' }, { id: 'sign', title: 'Sign' }, { id: 'complete', title: 'Complete' },
+];
+const US_STATES = 'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split(' ');
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const I9_AUTHORIZATION_OPTIONS: { value: Exclude<I9Session['authorization']['status'], ''>; label: string; description: string }[] = [
+  { value: 'citizen', label: 'A citizen of the United States', description: 'Includes people born in the U.S. and naturalized citizens.' },
+  { value: 'national', label: 'A noncitizen national of the United States', description: 'For example, people born in American Samoa.' },
+  { value: 'permanent', label: 'A lawful permanent resident', description: 'You will be asked for your USCIS or A-Number.' },
+  { value: 'authorized', label: 'A noncitizen authorized to work', description: 'You will be asked for an expiration date and your A-Number.' },
+];
+
+function demoFlag(name: string) { return typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(name); }
+function formatLongDate(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const update = () => setMatches(list.matches);
+    update();
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
+
+function JourneyShell({ title, subtitle, steps, activeIndex, onExit, footer, hideProgress, children }: {
+  title: string; subtitle?: string; steps: { id: string; title: string }[]; activeIndex: number; onExit: () => void;
+  footer?: React.ReactNode; hideProgress?: boolean; children: React.ReactNode;
+}) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef(onExit);
+  exitRef.current = onExit;
+  const narrow = useMediaQuery('(max-width: 720px)');
+  const titleId = useId();
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; opener?.focus?.(); };
+  }, []);
+
+  useEffect(() => { shellRef.current?.querySelector<HTMLElement>('[data-journey-focus]')?.focus(); }, [activeIndex]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const shell = shellRef.current;
+      if (!shell || Array.from(document.querySelectorAll('[aria-modal="true"]')).some(node => node !== shell)) return;
+      if (event.key === 'Escape') { exitRef.current(); return; }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(shell.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(node => node.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !shell.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  return createPortal(
+    <div ref={shellRef} className="journey-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <header className="journey-header">
+        <div className="journey-header-text">
+          <Text size="md" weight="semibold"><span id={titleId}>{title}</span></Text>
+          {subtitle && <Text size="xs" color="secondary">{subtitle}</Text>}
+        </div>
+        <Button kind="tertiary" size="small" startElement={<Icon name="close" size="small" />} onClick={onExit}>Exit</Button>
+      </header>
+      {!hideProgress && <nav className="journey-progress" aria-label="Progress">
+        <Stepper steps={steps.map((step, index) => ({ id: step.id, title: step.title, completed: index < activeIndex }))} activeStep={activeIndex} showDescription={false}
+          compact={narrow} compactTitle={steps[activeIndex]?.title} compactCurrent={activeIndex + 1} compactTotal={steps.length} />
+      </nav>}
+      <main className="journey-main"><div className="journey-content">
+        <p className="sr-only" role="status" aria-live="polite">{hideProgress ? title : `Step ${activeIndex + 1} of ${steps.length}: ${steps[activeIndex]?.title}`}</p>
+        {children}
+      </div></main>
+      {footer && <footer className="journey-footer"><div className="journey-footer-inner">{footer}</div></footer>}
+    </div>,
+    document.body,
+  );
+}
+
+function JourneyHeading({ title, description }: { title: string; description?: string }) {
+  return <Stack gap="small">
+    <h2 className="journey-step-title" tabIndex={-1} data-journey-focus>{title}</h2>
+    {description && <Text size="md" color="secondary">{description}</Text>}
+  </Stack>;
+}
+
+function I9SetupDialog({ template, onCancel, onStart }: { template: TemplateItem; onCancel: () => void; onStart: (setup: I9Setup) => void }) {
+  const [stage, setStage] = useState<'form' | 'review'>('form');
+  const [form, setForm] = useState<I9Setup>({ recipientName: '', recipientEmail: '', startDate: '', employerName: '', employerEmail: '', message: '', expiresInDays: '7' });
+  const [errors, setErrors] = useState<Partial<Record<keyof I9Setup, string>>>({});
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const loading = status === 'loading';
+
+  const update = (key: keyof I9Setup) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm(current => ({ ...current, [key]: event.target.value }));
+    setErrors(current => ({ ...current, [key]: undefined }));
+  };
+  const validate = () => {
+    const next: Partial<Record<keyof I9Setup, string>> = {};
+    if (!form.recipientName.trim()) next.recipientName = 'Enter the new hire’s full name.';
+    if (!form.recipientEmail.trim()) next.recipientEmail = 'Enter the new hire’s email address.';
+    else if (!EMAIL_PATTERN.test(form.recipientEmail)) next.recipientEmail = 'Enter a valid email address, like name@company.com.';
+    if (!form.startDate) next.startDate = 'Choose the employee’s first day of work.';
+    if (!form.employerName.trim()) next.employerName = 'Enter the employer representative’s name.';
+    if (!form.employerEmail.trim()) next.employerEmail = 'Enter the employer representative’s email address.';
+    else if (!EMAIL_PATTERN.test(form.employerEmail)) next.employerEmail = 'Enter a valid email address, like name@company.com.';
+    else if (form.employerEmail.trim().toLowerCase() === form.recipientEmail.trim().toLowerCase()) next.employerEmail = 'The employer representative needs a different email than the new hire.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const start = () => {
+    if (loading) return;
+    setStatus('loading');
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      if (demoFlag('i9') === 'setup-error' && attempts.current === 1) { setStatus('error'); return; }
+      onStart(form);
+    }, 900);
+  };
+
+  return <Modal open onClose={onCancel} title={stage === 'form' ? 'Set up Form I-9' : 'Review before starting'} size="large" closeOnEscape={!loading} closeOnBackdropClick={!loading}
+    footer={<Inline justify="end" gap="small">
+      {stage === 'form'
+        ? <><Button kind="secondary" onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={() => { if (validate()) setStage('review'); }}>Continue</Button></>
+        : <><Button kind="secondary" onClick={() => { setStatus('idle'); setStage('form'); }} disabled={loading}>Back</Button><Button kind="secondary" onClick={onCancel} disabled={loading}>Cancel</Button><Button kind="primary" loading={loading} onClick={start}>Start envelope</Button></>}
+    </Inline>}>
+    <Stack gap="large">
+      <Card radius="small"><Card.Body><Inline gap="medium" align="center">
+        <Icon name="document" size="medium" />
+        <Stack gap="none"><Text size="md" weight="semibold">{template.name}</Text><Text size="sm" color="secondary">Section 1 for the employee · Section 2 for the employer · 2 documents</Text></Stack>
+        <Badge kind="success" text="Published" />
+      </Inline></Card.Body></Card>
+      {status === 'error' && <Alert kind="danger" title="We couldn’t start the envelope" action={{ label: 'Try again', onClick: start }}>Something went wrong on our side. Your answers are still here.</Alert>}
+      {stage === 'form' ? <Stack gap="large">
+        <Input label="Sender" value="Akshat Mishra · People Team" readOnly description="The envelope is sent from your account." />
+        <Stack gap="medium">
+          <Text size="md" weight="semibold">Employee (signer)</Text>
+          <Grid columns={2} gap="medium">
+            <Input label="Full name" required placeholder="Jordan Ellis" value={form.recipientName} error={errors.recipientName} onChange={update('recipientName')} />
+            <Input label="Email address" required type="email" placeholder="jordan.ellis@example.com" value={form.recipientEmail} error={errors.recipientEmail} onChange={update('recipientEmail')} />
+          </Grid>
+          <Input label="First day of work" required type="date" value={form.startDate} error={errors.startDate} onChange={update('startDate')} description="Section 1 must be completed by this date." />
+        </Stack>
+        <Stack gap="medium">
+          <Text size="md" weight="semibold">Employer representative</Text>
+          <Grid columns={2} gap="medium">
+            <Input label="Full name" required placeholder="Priya Raman" value={form.employerName} error={errors.employerName} onChange={update('employerName')} />
+            <Input label="Email address" required type="email" placeholder="priya.raman@example.com" value={form.employerEmail} error={errors.employerEmail} onChange={update('employerEmail')} />
+          </Grid>
+        </Stack>
+        <Input label="Message to the employee" multiline rows={3} placeholder="Welcome to the team. Please complete this form before your first day." value={form.message} onChange={update('message')} />
+        <Select label="Link expires after" value={form.expiresInDays} onChange={update('expiresInDays')}>{['3', '7', '14'].map(days => <option key={days} value={days}>{days} days</option>)}</Select>
+      </Stack> : <Stack gap="medium">
+        <Text size="sm" color="secondary">Check the details below. The employee receives a secure link by email.</Text>
+        <Grid columns={2} gap="medium">
+          {([['Sender', 'Akshat Mishra'], ['Employee', `${form.recipientName} · ${form.recipientEmail}`], ['First day of work', formatLongDate(form.startDate)], ['Employer representative', `${form.employerName} · ${form.employerEmail}`], ['Link expires', `${form.expiresInDays} days after sending`], ['Message', form.message || 'No message']] as const).map(([label, value]) =>
+            <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value}</Text></Stack>)}
+        </Grid>
+      </Stack>}
+    </Stack>
+  </Modal>;
+}
+
+function I9Journey({ session, setSession, onExit, onFinish }: {
+  session: I9Session; setSession: React.Dispatch<React.SetStateAction<I9Session | null>>; onExit: () => void; onFinish: (completed: boolean) => void;
+}) {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [confirmExit, setConfirmExit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  const attempts = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const expired = demoFlag('i9') === 'expired';
+  const { step, personal, authorization } = session;
+  const legalName = `${personal.firstName} ${personal.lastName}`.trim();
+  const completed = step === I9_STEPS.length - 1;
+
+  const patch = (change: Partial<I9Session>) => setSession(current => current ? { ...current, ...change } : current);
+  const patchPersonal = (key: keyof I9Session['personal']) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    patch({ personal: { ...personal, [key]: event.target.value } });
+    setErrors(current => ({ ...current, [key]: '' }));
+  };
+  const go = (next: number) => { setErrors({}); setSubmitError(false); patch({ step: next }); };
+
+  const validatePersonal = () => {
+    const next: Record<string, string> = {};
+    if (!personal.firstName.trim()) next.firstName = 'Enter your first name.';
+    if (!personal.lastName.trim()) next.lastName = 'Enter your last name.';
+    if (!personal.dob) next.dob = 'Enter your date of birth.';
+    else if (new Date(`${personal.dob}T00:00:00`) >= new Date()) next.dob = 'Date of birth must be in the past.';
+    if (!personal.address.trim()) next.address = 'Enter your street address.';
+    if (!personal.city.trim()) next.city = 'Enter your city.';
+    if (!personal.state) next.state = 'Choose a state.';
+    if (!/^\d{5}$/.test(personal.zip)) next.zip = 'Enter a 5-digit ZIP code.';
+    if (!EMAIL_PATTERN.test(personal.email)) next.email = 'Enter a valid email address.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const validateAuthorization = () => {
+    const next: Record<string, string> = {};
+    if (!authorization.status) next.status = 'Choose the option that describes you.';
+    if ((authorization.status === 'permanent' || authorization.status === 'authorized') && !/^A?-?\d{7,9}$/i.test(authorization.aNumber.trim())) next.aNumber = 'Enter your A-Number, like A123456789.';
+    if (authorization.status === 'authorized') {
+      if (!authorization.expires) next.expires = 'Enter the date your work authorization expires.';
+      else if (new Date(`${authorization.expires}T00:00:00`) <= new Date()) next.expires = 'The expiration date must be in the future.';
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const next = () => {
+    if (step === 1 && !validatePersonal()) return;
+    if (step === 2 && !validateAuthorization()) return;
+    if (step === 3 && !session.attested) { setErrors({ attested: 'Confirm the statement to continue.' }); return; }
+    go(step + 1);
+  };
+  const sign = () => {
+    if (submitting) return;
+    if (session.signature.trim().toLowerCase() !== legalName.toLowerCase()) { setErrors({ signature: `Type your name exactly as shown: ${legalName}` }); return; }
+    setErrors({}); setSubmitError(false); setSubmitting(true);
+    timer.current = window.setTimeout(() => {
+      attempts.current += 1;
+      setSubmitting(false);
+      if (demoFlag('i9') === 'error' && attempts.current === 1) { setSubmitError(true); return; }
+      setSession(current => current ? { ...current, step: 5, submittedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }) } : current);
+    }, 1000);
+  };
+  const requestExit = () => (expired || completed) ? onFinish(completed) : setConfirmExit(true);
+
+  const footer = expired ? <Button kind="primary" onClick={() => onFinish(false)}>Close</Button>
+    : completed ? <Button kind="primary" onClick={() => onFinish(true)}>Done</Button>
+    : <>{step > 0 ? <Button kind="secondary" onClick={() => go(step - 1)} disabled={submitting}>Back</Button> : <span />}
+      {step === 4 ? <Button kind="primary" loading={submitting} onClick={sign}>Sign and submit</Button> : <Button kind="primary" onClick={next}>{step === 0 ? 'Get started' : step === 3 ? 'Continue to sign' : 'Continue'}</Button>}</>;
+
+  const summary = (rows: [string, string][]) => <Grid columns={2} gap="medium">{rows.map(([label, value]) => <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value || 'Not provided'}</Text></Stack>)}</Grid>;
+  const authorizationLabel = I9_AUTHORIZATION_OPTIONS.find(option => option.value === authorization.status)?.label ?? '';
+
+  return <>
+    <JourneyShell title="Form I-9, Section 1" subtitle={`Employment Eligibility Verification · from ${session.employerName}`} steps={I9_STEPS} activeIndex={step} onExit={requestExit} footer={footer} hideProgress={expired}>
+      {expired ? <Stack gap="large">
+        <JourneyHeading title="This link has expired" description={`For security, this link expired ${session.expiresInDays} days after it was sent. Your answers weren’t submitted.`} />
+        <Alert kind="warning" title="Ask for a new link">Contact {session.employerName} at {session.employerEmail} and ask them to send Form I-9 again.</Alert>
+      </Stack> : step === 0 ? <Stack gap="large">
+        <JourneyHeading title={`Welcome${session.recipientName ? `, ${session.recipientName.split(' ')[0]}` : ''}`} description="Federal law requires every new employee to confirm they can work in the United States. This takes about 10 minutes." />
+        {session.message && <Alert kind="information" title={`A note from ${session.employerName}`}>{session.message}</Alert>}
+        <Card radius="small"><Card.Header><Text size="md" weight="semibold">Have these ready</Text></Card.Header><Card.Body><Stack gap="small">
+          <Text size="sm">Your legal name and date of birth</Text><Text size="sm">Your current home address</Text><Text size="sm">Your A-Number, if you are not a U.S. citizen</Text>
+        </Stack></Card.Body></Card>
+        <Text size="sm" color="secondary">You don’t need to upload documents here. {session.employerName} will review your documents in person within 3 business days of {formatLongDate(session.startDate)}.</Text>
+      </Stack> : step === 1 ? <Stack gap="large">
+        <JourneyHeading title="Personal information" description="Enter your details exactly as they appear on your identity documents." />
+        <Grid columns={2} gap="medium">
+          <Input label="First name" required autoComplete="given-name" value={personal.firstName} error={errors.firstName} onChange={patchPersonal('firstName')} />
+          <Input label="Last name" required autoComplete="family-name" value={personal.lastName} error={errors.lastName} onChange={patchPersonal('lastName')} />
+        </Grid>
+        <Input label="Other last names used" value={personal.otherNames} onChange={patchPersonal('otherNames')} description="Optional. Include maiden names." />
+        <Input label="Date of birth" required type="date" autoComplete="bday" value={personal.dob} error={errors.dob} onChange={patchPersonal('dob')} />
+        <Input label="Street address" required autoComplete="street-address" value={personal.address} error={errors.address} onChange={patchPersonal('address')} />
+        <Grid columns={3} gap="medium">
+          <Input label="City" required autoComplete="address-level2" value={personal.city} error={errors.city} onChange={patchPersonal('city')} />
+          <Select label="State" required value={personal.state} error={errors.state} onChange={patchPersonal('state')}><option value="">Select</option>{US_STATES.map(code => <option key={code} value={code}>{code}</option>)}</Select>
+          <Input label="ZIP code" required inputMode="numeric" autoComplete="postal-code" value={personal.zip} error={errors.zip} onChange={patchPersonal('zip')} />
+        </Grid>
+        <Grid columns={2} gap="medium">
+          <Input label="Email address" required type="email" autoComplete="email" value={personal.email} error={errors.email} onChange={patchPersonal('email')} />
+          <Input label="Phone number" type="tel" autoComplete="tel" value={personal.phone} onChange={patchPersonal('phone')} description="Optional." />
+        </Grid>
+      </Stack> : step === 2 ? <Stack gap="large">
+        <JourneyHeading title="Work authorization" description="I attest, under penalty of perjury, that I am:" />
+        <fieldset className="journey-fieldset" aria-describedby={errors.status ? 'i9-status-error' : undefined}>
+          <legend className="sr-only">Citizenship and work authorization status</legend>
+          <Stack gap="medium">
+            {I9_AUTHORIZATION_OPTIONS.map(option => <Radio key={option.value} name="i9-status" label={option.label} description={option.description} checked={authorization.status === option.value}
+              onChange={() => { patch({ authorization: { ...authorization, status: option.value } }); setErrors({}); }} />)}
+            {errors.status && <Text size="sm" color="error"><span id="i9-status-error">{errors.status}</span></Text>}
+          </Stack>
+        </fieldset>
+        {(authorization.status === 'permanent' || authorization.status === 'authorized') && <Input label="A-Number" required value={authorization.aNumber} error={errors.aNumber} placeholder="A123456789" onChange={event => { patch({ authorization: { ...authorization, aNumber: event.target.value } }); setErrors(current => ({ ...current, aNumber: '' })); }} />}
+        {authorization.status === 'authorized' && <Input label="Work authorization expires" required type="date" value={authorization.expires} error={errors.expires} onChange={event => { patch({ authorization: { ...authorization, expires: event.target.value } }); setErrors(current => ({ ...current, expires: '' })); }} />}
+      </Stack> : step === 3 ? <Stack gap="large">
+        <JourneyHeading title="Review your answers" description="Make sure everything is correct before you sign." />
+        <Card radius="small"><Card.Header><Inline justify="between" align="center"><Text size="md" weight="semibold">Personal information</Text><Button kind="tertiary" size="small" onClick={() => go(1)}>Edit</Button></Inline></Card.Header><Card.Body>
+          {summary([['Name', legalName], ['Date of birth', formatLongDate(personal.dob)], ['Address', `${personal.address}, ${personal.city}, ${personal.state} ${personal.zip}`], ['Email', personal.email], ['Phone', personal.phone], ['Other last names', personal.otherNames]])}
+        </Card.Body></Card>
+        <Card radius="small"><Card.Header><Inline justify="between" align="center"><Text size="md" weight="semibold">Work authorization</Text><Button kind="tertiary" size="small" onClick={() => go(2)}>Edit</Button></Inline></Card.Header><Card.Body>
+          {summary([['Status', authorizationLabel], ...(authorization.aNumber ? [['A-Number', authorization.aNumber] as [string, string]] : []), ...(authorization.expires ? [['Expires', formatLongDate(authorization.expires)] as [string, string]] : [])])}
+        </Card.Body></Card>
+        <Checkbox label="I attest, under penalty of perjury, that the information I provided is true and correct." checked={session.attested} error={!!errors.attested} errorMessage={errors.attested} showErrorMessage
+          onChange={event => { patch({ attested: event.target.checked }); setErrors({}); }} />
+      </Stack> : step === 4 ? <Stack gap="large">
+        <JourneyHeading title="Sign Section 1" description="Type your full legal name to sign this form electronically." />
+        {submitError && <Alert kind="danger" title="We couldn’t submit your form" action={{ label: 'Try again', onClick: sign }}>Something went wrong on our side. Your answers are saved.</Alert>}
+        <Input label="Type your full legal name" required autoComplete="off" value={session.signature} error={errors.signature} description={`Must match: ${legalName}`} onChange={event => { patch({ signature: event.target.value }); setErrors({}); }} />
+        <Input label="Date signed" value={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} readOnly />
+      </Stack> : <Stack gap="large">
+        <JourneyHeading title="Section 1 is complete" description={`Thank you, ${personal.firstName}. Your form was submitted on ${session.submittedAt}.`} />
+        <Alert kind="success" title="What happens next">{session.employerName} will review your identity documents in person within 3 business days of {formatLongDate(session.startDate)} and complete Section 2.</Alert>
+        <Card radius="small"><Card.Header><Text size="md" weight="semibold">Bring these documents on your first day</Text></Card.Header><Card.Body><Stack gap="small">
+          <Text size="sm">One document from List A, such as a U.S. passport, or</Text><Text size="sm">One document from List B and one from List C, such as a driver’s license and a Social Security card</Text>
+        </Stack></Card.Body></Card>
+      </Stack>}
+    </JourneyShell>
+    {confirmExit && <Modal open size="small" title="Exit this form?" onClose={() => setConfirmExit(false)}
+      footer={<Inline justify="end" gap="small"><Button kind="tertiary" onClick={() => onFinish(false)}>Discard answers</Button><Button kind="secondary" onClick={() => setConfirmExit(false)}>Keep going</Button><Button kind="primary" onClick={() => { setConfirmExit(false); onExit(); }}>Save and exit</Button></Inline>}>
+      <Text size="md">Your answers are saved. You can resume from the Template Gallery.</Text>
+    </Modal>}
+  </>;
+}
+
 function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate }: {
   view: TemplatesSidebarView; onNavigate: (view: TemplatesSidebarView) => void; search: string; onSearchChange: (value: string) => void;
   items: TemplateItem[]; onItemsChange: React.Dispatch<React.SetStateAction<TemplateItem[]>>; editor: TemplateEditorState | null;
@@ -2046,6 +2387,10 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const [notice, setNotice] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(25);
+  const [galleryCategory, setGalleryCategory] = useState('All');
+  const [i9Template, setI9Template] = useState<TemplateItem | null>(null);
+  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'journey'>('closed');
+  const [i9Session, setI9Session] = useState<I9Session | null>(null);
   const kind = templateKindForView(view);
   const isGallery = view === 'template-gallery';
   const isEnvelope = ['my-templates', 'shared-with-me', 'favorites', 'all-templates'].includes(view);
@@ -2061,6 +2406,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   });
   const filteredTemplates = viewTemplates.filter(item => {
     if (search && !`${item.name} ${item.description} ${item.owner}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (isGallery && galleryCategory !== 'All' && TEMPLATE_KINDS[item.kind ?? 'envelope'].label !== galleryCategory) return false;
     if (!isEnvelope) return status === 'All statuses' || (item.status ?? 'Published') === status;
     if (advancedFilters.owner && !item.owner.toLowerCase().includes(advancedFilters.owner.toLowerCase())) return false;
     if (advancedFilters.sharedOnly && !item.shared) return false;
@@ -2076,7 +2422,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     }
     return true;
   });
-  const clearFilters = () => { onSearchChange(''); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); };
+  const clearFilters = () => { onSearchChange(''); setGalleryCategory('All'); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); };
   const toggleFavorite = (item: TemplateItem) => onItemsChange(current => current.map(row => row.id === item.id ? { ...row, favorited: !row.favorited } : row));
   const duplicate = (item: TemplateItem) => {
     onItemsChange(current => [{ ...item, id: crypto.randomUUID(), name: `${item.name} (copy)`, owner: 'Akshat Mishra', shared: false, status: 'Draft', uses: 0, lastModified: new Date().toLocaleDateString('en-US') }, ...current]);
@@ -2086,7 +2432,8 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   };
   const useTemplate = (item: TemplateItem) => {
     setPreview(null);
-    if ((item.kind ?? 'envelope') === 'envelope' || item.kind === 'workflow') onUseTemplate(item);
+    if (item.journey === 'i9') { setI9Template(item); setI9Phase('setup'); }
+    else if ((item.kind ?? 'envelope') === 'envelope' || item.kind === 'workflow') onUseTemplate(item);
     else duplicate(item);
   };
   const columns: DataTableColumn<TemplateItem>[] = [
@@ -2113,32 +2460,63 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const list = <AgreementTableView
     paddingVariant={isEnvelope ? 'compact' : 'default'}
     pageHeader={<PageHeader title={TEMPLATE_VIEW_LABELS[view]} actions={isEnvelope ? undefined : <Button kind="primary" startElement={<Icon name="plus" size="small" />} onClick={() => onEditorChange({ kind })}>Create {TEMPLATE_KINDS[kind].label.toLowerCase()}</Button>} />}
-    banner={notice ? <Banner kind="success" closable onClose={() => setNotice('')}>{notice}</Banner> : undefined}
+    banner={notice ? <Banner kind="success" closable onClose={() => setNotice('')}>{notice}</Banner>
+      : i9Session && i9Phase === 'closed' ? <Banner kind="information">
+        <Inline gap="medium" align="center" wrap>
+          <span>{`Form I-9 for ${i9Session.recipientName} is in progress (step ${i9Session.step + 1} of ${I9_STEPS.length}).`}</span>
+          <Button kind="secondary" size="small" onClick={() => setI9Phase('journey')}>Resume</Button>
+        </Inline>
+      </Banner> : undefined}
     filterBar={<FilterBar className={isEnvelope ? 'template-list-filters' : undefined} search={{ value: search, onChange: onSearchChange, placeholder: `Search ${TEMPLATE_VIEW_LABELS[view]}` }} filters={<Inline gap="small">
       {isEnvelope ? <>
         <Dropdown items={['Any time', 'Last 30 days', 'Last 90 days', 'This year'].map(value => ({ label: value, selected: dateRange === value, onClick: () => setDateRange(value) }))}><Button kind="secondary" size="small" menuTrigger>{dateRange === 'Any time' ? 'Date' : dateRange}</Button></Dropdown>
         <Button kind="secondary" size="small" menuTrigger onClick={() => { setAdvancedDraft(advancedFilters); setShowAdvancedSearch(true); }}>Advanced search</Button>
         <Button kind="tertiary" size="small" onClick={clearFilters}>Clear</Button>
       </> : <>
-        <Dropdown items={['All statuses', 'Published', 'Draft'].map(value => ({ label: value, selected: status === value, onClick: () => setStatus(value) }))}><Button kind="secondary" size="small" menuTrigger>{status}</Button></Dropdown>
-        {(search || status !== 'All statuses') && <Button kind="tertiary" size="small" onClick={clearFilters}>Clear</Button>}
+        {isGallery
+          ? <Dropdown items={['All', ...Object.values(TEMPLATE_KINDS).map(entry => entry.label)].map(value => ({ label: value, selected: galleryCategory === value, onClick: () => setGalleryCategory(value) }))}><Button kind="secondary" size="small" menuTrigger>{galleryCategory === 'All' ? 'All categories' : galleryCategory}</Button></Dropdown>
+          : <Dropdown items={['All statuses', 'Published', 'Draft'].map(value => ({ label: value, selected: status === value, onClick: () => setStatus(value) }))}><Button kind="secondary" size="small" menuTrigger>{status}</Button></Dropdown>}
+        {(search || status !== 'All statuses' || galleryCategory !== 'All') && <Button kind="tertiary" size="small" onClick={clearFilters}>Clear</Button>}
       </>}
     </Inline>} />}
   >
     <Stack gap="medium">
     {!isEnvelope && <Text size="sm" color="secondary">{isGallery ? 'Find a starting point, then customize a copy for your team.' : TEMPLATE_KINDS[kind].description}</Text>}
-    {isGallery ? <Grid columns="auto" gap="medium">{filteredTemplates.map(item => <Card key={item.id} radius="large">
-      {item.document ? <Card.Image src={templateDocumentUrl(item, 1)} alt={`First page of ${item.name}`} imageSpacing="document-preview" ratio="1:1" /> : <Card.Header><Inline justify="between"><Icon name={TEMPLATE_KINDS[item.kind ?? 'envelope'].icon} size="medium" /><Badge kind="subtle" text={TEMPLATE_KINDS[item.kind ?? 'envelope'].label} /></Inline></Card.Header>}
-      <Card.Body><Stack gap="small"><Text size="md" weight="semibold">{item.name}</Text><Text size="sm" color="secondary">{item.description}</Text></Stack></Card.Body>
-      <Card.Footer><Button kind="secondary" size="small" onClick={() => setPreview(item)}>Preview template</Button></Card.Footer>
-    </Card>)}</Grid> : <DataTable className="template-list-table" columns={columns} data={filteredTemplates.slice((page - 1) * pageSize, page * pageSize)} getRowKey={item => item.id} selectable stickyHeader showColumnControl rowHeight="tall" onRowClick={setPreview} emptyMessage="No templates match your search" pagination={{ page, pageSize, totalItems: filteredTemplates.length, onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1); }, showInfo: true }} />}
-    {isGallery && filteredTemplates.length === 0 && <EmptyState header={<EmptyState.Header text="No templates found" />} callToAction={<Button kind="secondary" onClick={() => onSearchChange('')}>Clear search</Button>}>Try another name or agreement type.</EmptyState>}
+    {isGallery ? <Stack gap="large">
+      {filteredTemplates.filter(item => item.journey === 'i9').map(item => <Card key={item.id} radius="large" className="template-featured"><Card.Body>
+        <div className="template-featured-body">
+          <div className="template-featured-icon" aria-hidden="true"><Icon name="document" size="medium" /></div>
+          <Stack gap="small">
+            <Inline gap="small" wrap><Badge kind="subtle" text="HR" /><Badge kind="subtle" text="New hire onboarding" /><Badge kind="success" text="Published" /></Inline>
+            <h2 className="template-featured-title">{item.name}</h2>
+            <Text size="md" color="secondary">{item.description}</Text>
+            <Text size="sm" color="secondary">6 steps for the employee · about 10 minutes · used {item.uses} times</Text>
+          </Stack>
+          <Inline gap="small" className="template-featured-actions"><Button kind="secondary" onClick={() => setPreview(item)}>Preview</Button><Button kind="primary" onClick={() => useTemplate(item)}>Use template</Button></Inline>
+        </div>
+      </Card.Body></Card>)}
+      <Grid columns="auto" gap="medium">{filteredTemplates.filter(item => item.journey !== 'i9').map(item => <Card key={item.id} radius="large">
+        {item.document ? <Card.Image src={templateDocumentUrl(item, 1)} alt={`First page of ${item.name}`} imageSpacing="document-preview" ratio="1:1" /> : <Card.Header><Inline justify="between"><Icon name={TEMPLATE_KINDS[item.kind ?? 'envelope'].icon} size="medium" /><Badge kind="subtle" text={TEMPLATE_KINDS[item.kind ?? 'envelope'].label} /></Inline></Card.Header>}
+        <Card.Body><Stack gap="small"><Text size="md" weight="semibold">{item.name}</Text><Text size="sm" color="secondary">{item.description}</Text></Stack></Card.Body>
+        <Card.Footer><Inline gap="small" wrap><Button kind="secondary" size="small" onClick={() => setPreview(item)}>Preview</Button><Button kind="tertiary" size="small" onClick={() => useTemplate(item)}>{(item.kind ?? 'envelope') === 'envelope' || item.kind === 'workflow' ? 'Use template' : 'Create a copy'}</Button></Inline></Card.Footer>
+      </Card>)}</Grid>
+    </Stack> : <DataTable className="template-list-table" columns={columns} data={filteredTemplates.slice((page - 1) * pageSize, page * pageSize)} getRowKey={item => item.id} selectable stickyHeader showColumnControl rowHeight="tall" onRowClick={setPreview} emptyMessage="No templates match your search" pagination={{ page, pageSize, totalItems: filteredTemplates.length, onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1); }, showInfo: true }} />}
+    {isGallery && filteredTemplates.length === 0 && <EmptyState header={<EmptyState.Header text="No templates found" />} callToAction={<Button kind="secondary" onClick={clearFilters}>Clear filters</Button>}>Try another name or category.</EmptyState>}
     </Stack>
   </AgreementTableView>;
   return <>
     {(isEnvelope || view === 'elastic-templates') ? <Tabs className="template-screen-tabs" value={view === 'elastic-templates' ? 'elastic-template-list' : 'envelope-template-list'} onChange={tab => { onSearchChange(''); onNavigate(tab === 'elastic-template-list' ? 'elastic-templates' : 'my-templates'); }} tabs={[
       { id: 'envelope-template-list', label: 'Templates', content: list }, { id: 'elastic-template-list', label: 'Elastic Templates', content: list },
     ]} /> : list}
+    {i9Phase === 'setup' && i9Template && <I9SetupDialog template={i9Template} onCancel={() => setI9Phase('closed')} onStart={setup => {
+      setI9Session({ ...setup, step: 0, personal: { firstName: '', lastName: '', otherNames: '', dob: '', address: '', city: '', state: '', zip: '', email: setup.recipientEmail, phone: '' }, authorization: { status: '', aNumber: '', expires: '' }, attested: false, signature: '' });
+      setI9Phase('journey');
+    }} />}
+    {i9Phase === 'journey' && i9Session && <I9Journey session={i9Session} setSession={setI9Session} onExit={() => setI9Phase('closed')} onFinish={completed => {
+      setI9Phase('closed');
+      if (completed) setNotice(`Form I-9 Section 1 was submitted by ${i9Session.recipientName}. ${i9Session.employerName} will complete Section 2.`);
+      setI9Session(null);
+    }} />}
     {showAdvancedSearch && <Modal open onClose={() => setShowAdvancedSearch(false)} title="Advanced search" size="medium" footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => setShowAdvancedSearch(false)}>Cancel</Button><Button kind="primary" onClick={() => { setAdvancedFilters(advancedDraft); setShowAdvancedSearch(false); }}>Apply filters</Button></Inline>}>
       <Stack gap="medium">
         <Input label="Owner" placeholder="Search by owner name" value={advancedDraft.owner} onChange={event => setAdvancedDraft(current => ({ ...current, owner: event.target.value }))} />
@@ -2153,7 +2531,11 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
       <Stack gap="large">
         <Text size="md">{preview.description}</Text>
         <Grid columns={3} gap="medium"><Stack gap="small"><Text size="xs" color="secondary">Type</Text><Text size="sm">{TEMPLATE_KINDS[preview.kind ?? 'envelope'].label}</Text></Stack><Stack gap="small"><Text size="xs" color="secondary">Owner</Text><Text size="sm">{preview.owner}</Text></Stack><Stack gap="small"><Text size="xs" color="secondary">Last change</Text><Text size="sm">{preview.lastModified}</Text></Stack></Grid>
-        {preview.document ? <TemplateDocumentPages template={preview} /> : <Card radius="small"><Card.Header><Text size="md" weight="semibold">{preview.kind === 'workflow' ? 'Workflow steps' : preview.kind === 'web-form' ? 'Form fields' : preview.kind === 'workspace' ? 'Workspace contents' : 'Template content'}</Text></Card.Header><Card.Body><Stack gap="medium">
+        {preview.journey === 'i9' ? <Card radius="small"><Card.Header><Text size="md" weight="semibold">What’s included</Text></Card.Header><Card.Body><Stack gap="medium">
+          <Text size="sm"><strong>Documents:</strong> Form I-9, Section 1 (employee) and Section 2 (employer review)</Text>
+          <Text size="sm"><strong>Signers:</strong> New hire completes Section 1, then the employer representative completes Section 2</Text>
+          <Text size="sm"><strong>Employee steps:</strong> Instructions, personal information, work authorization, review, sign, complete</Text>
+        </Stack></Card.Body></Card> : preview.document ? <TemplateDocumentPages template={preview} /> : <Card radius="small"><Card.Header><Text size="md" weight="semibold">{preview.kind === 'workflow' ? 'Workflow steps' : preview.kind === 'web-form' ? 'Form fields' : preview.kind === 'workspace' ? 'Workspace contents' : 'Template content'}</Text></Card.Header><Card.Body><Stack gap="medium">
           {preview.kind === 'workflow' ? <><Text size="sm">1. Collect agreement information</Text><Text size="sm">2. Request approval from the team</Text><Text size="sm">3. Send the agreement for signature</Text><Text size="sm">4. Notify the owner when completed</Text></> : preview.kind === 'web-form' ? <><Input label="Full name" placeholder="Enter your name" readOnly /><Input label="Email address" placeholder="name@company.com" readOnly /><Input label="Company" placeholder="Company name" readOnly /></> : preview.kind === 'workspace' ? <><Text size="sm">Agreement documents</Text><Text size="sm">Review and approval tasks</Text><Text size="sm">Shared contacts and activity</Text></> : <><Text size="sm" weight="semibold">{preview.name}</Text><Text size="sm">{preview.kind === 'clause' ? `${preview.description} The parties agree to the terms set out in this agreement, subject to the applicable statement of work and any written amendments.` : 'This template includes reusable agreement content. Add the parties, review the terms, and prepare a copy for your next agreement.'}</Text><Text size="xs" color="secondary">Prepared for Protolab · {preview.lastModified}</Text></>}
         </Stack></Card.Body></Card>}
       </Stack>
