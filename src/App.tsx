@@ -2147,84 +2147,108 @@ function JourneyHeading({ title, description }: { title: string; description?: s
   </Stack>;
 }
 
-function I9SetupDialog({ template, onCancel, onStart }: { template: TemplateItem; onCancel: () => void; onStart: (setup: I9Setup) => void }) {
-  const [stage, setStage] = useState<'form' | 'review'>('form');
-  const [form, setForm] = useState<I9Setup>({ recipientName: '', recipientEmail: '', startDate: '', employerName: '', employerEmail: '', message: '', expiresInDays: '7' });
-  const [errors, setErrors] = useState<Partial<Record<keyof I9Setup, string>>>({});
+const VERIFICATION_METHODS = ['Verification On-Demand (OneNotary)', 'In-person', 'Employee Designated'];
+const QUICK_SEND_DEFAULT_MESSAGE = 'Hello,\n\nPlease complete Section 1 of your Form I-9 so we can verify your identity and work authorization before your first day.\n\nThank you,\nPeople Team';
+
+function QuickSend({ template, onCancel, onStart }: { template: TemplateItem; onCancel: () => void; onStart: (setup: I9Setup) => void }) {
+  const [form, setForm] = useState({ recipientName: '', recipientEmail: '', method: VERIFICATION_METHODS[0], customEmail: false, subject: 'Please complete your Form I-9', message: QUICK_SEND_DEFAULT_MESSAGE });
+  const [errors, setErrors] = useState<{ recipientName?: string; recipientEmail?: string }>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [showTaggerNote, setShowTaggerNote] = useState(false);
+  const [messageOpen, setMessageOpen] = useState(true);
   const attempts = useRef(0);
   const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef(onCancel);
+  exitRef.current = onCancel;
+  const titleId = useId();
   const loading = status === 'loading';
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    shellRef.current?.querySelector<HTMLElement>('input')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !Array.from(document.querySelectorAll('[aria-modal="true"]')).some(node => node !== shellRef.current)) exitRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = previousOverflow; opener?.focus?.(); };
+  }, []);
 
-  const update = (key: keyof I9Setup) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setForm(current => ({ ...current, [key]: event.target.value }));
-    setErrors(current => ({ ...current, [key]: undefined }));
-  };
-  const validate = () => {
-    const next: Partial<Record<keyof I9Setup, string>> = {};
-    if (!form.recipientName.trim()) next.recipientName = 'Enter the new hire’s full name.';
-    if (!form.recipientEmail.trim()) next.recipientEmail = 'Enter the new hire’s email address.';
-    else if (!EMAIL_PATTERN.test(form.recipientEmail)) next.recipientEmail = 'Enter a valid email address, like name@company.com.';
-    if (!form.startDate) next.startDate = 'Choose the employee’s first day of work.';
-    if (!form.employerName.trim()) next.employerName = 'Enter the employer representative’s name.';
-    if (!form.employerEmail.trim()) next.employerEmail = 'Enter the employer representative’s email address.';
-    else if (!EMAIL_PATTERN.test(form.employerEmail)) next.employerEmail = 'Enter a valid email address, like name@company.com.';
-    else if (form.employerEmail.trim().toLowerCase() === form.recipientEmail.trim().toLowerCase()) next.employerEmail = 'The employer representative needs a different email than the new hire.';
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
-  const start = () => {
+  const send = () => {
     if (loading) return;
+    const next: typeof errors = {};
+    if (!form.recipientName.trim()) next.recipientName = 'Enter the employee’s full name.';
+    if (!form.recipientEmail.trim()) next.recipientEmail = 'Enter the employee’s email address.';
+    else if (!EMAIL_PATTERN.test(form.recipientEmail)) next.recipientEmail = 'Enter a valid email address, like name@company.com.';
+    setErrors(next);
+    if (Object.keys(next).length) return;
     setStatus('loading');
     timer.current = window.setTimeout(() => {
       attempts.current += 1;
       if (demoFlag('i9') === 'setup-error' && attempts.current === 1) { setStatus('error'); return; }
-      onStart(form);
+      onStart({ recipientName: form.recipientName, recipientEmail: form.recipientEmail, startDate: new Date().toISOString().slice(0, 10), employerName: 'Akshat Mishra', employerEmail: 'akshat.mishra@example.com', message: form.message, expiresInDays: '7' });
     }, 900);
   };
 
-  return <Modal open onClose={onCancel} title={stage === 'form' ? 'Set up Form I-9' : 'Review before starting'} size="large" closeOnEscape={!loading} closeOnBackdropClick={!loading}
-    footer={<Inline justify="end" gap="small">
-      {stage === 'form'
-        ? <><Button kind="secondary" onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={() => { if (validate()) setStage('review'); }}>Continue</Button></>
-        : <><Button kind="secondary" onClick={() => { setStatus('idle'); setStage('form'); }} disabled={loading}>Back</Button><Button kind="secondary" onClick={onCancel} disabled={loading}>Cancel</Button><Button kind="primary" loading={loading} onClick={start}>Start envelope</Button></>}
-    </Inline>}>
-    <Stack gap="large">
-      <Card radius="small"><Card.Body><Inline gap="medium" align="center">
-        <Icon name="document" size="medium" />
-        <Stack gap="none"><Text size="md" weight="semibold">{template.name}</Text><Text size="sm" color="secondary">Section 1 for the employee · Section 2 for the employer · 2 documents</Text></Stack>
-        <Badge kind="success" text="Published" />
-      </Inline></Card.Body></Card>
-      {status === 'error' && <Alert kind="danger" title="We couldn’t start the envelope" action={{ label: 'Try again', onClick: start }}>Something went wrong on our side. Your answers are still here.</Alert>}
-      {stage === 'form' ? <Stack gap="large">
-        <Input label="Sender" value="Akshat Mishra · People Team" readOnly description="The envelope is sent from your account." />
-        <Stack gap="medium">
-          <Text size="md" weight="semibold">Employee (signer)</Text>
-          <Grid columns={2} gap="medium">
-            <Input label="Full name" required placeholder="Jordan Ellis" value={form.recipientName} error={errors.recipientName} onChange={update('recipientName')} />
-            <Input label="Email address" required type="email" placeholder="jordan.ellis@example.com" value={form.recipientEmail} error={errors.recipientEmail} onChange={update('recipientEmail')} />
-          </Grid>
-          <Input label="First day of work" required type="date" value={form.startDate} error={errors.startDate} onChange={update('startDate')} description="Section 1 must be completed by this date." />
-        </Stack>
-        <Stack gap="medium">
-          <Text size="md" weight="semibold">Employer representative</Text>
-          <Grid columns={2} gap="medium">
-            <Input label="Full name" required placeholder="Priya Raman" value={form.employerName} error={errors.employerName} onChange={update('employerName')} />
-            <Input label="Email address" required type="email" placeholder="priya.raman@example.com" value={form.employerEmail} error={errors.employerEmail} onChange={update('employerEmail')} />
-          </Grid>
-        </Stack>
-        <Input label="Message to the employee" multiline rows={3} placeholder="Welcome to the team. Please complete this form before your first day." value={form.message} onChange={update('message')} />
-        <Select label="Link expires after" value={form.expiresInDays} onChange={update('expiresInDays')}>{['3', '7', '14'].map(days => <option key={days} value={days}>{days} days</option>)}</Select>
-      </Stack> : <Stack gap="medium">
-        <Text size="sm" color="secondary">Check the details below. The employee receives a secure link by email.</Text>
-        <Grid columns={2} gap="medium">
-          {([['Sender', 'Akshat Mishra'], ['Employee', `${form.recipientName} · ${form.recipientEmail}`], ['First day of work', formatLongDate(form.startDate)], ['Employer representative', `${form.employerName} · ${form.employerEmail}`], ['Link expires', `${form.expiresInDays} days after sending`], ['Message', form.message || 'No message']] as const).map(([label, value]) =>
-            <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value}</Text></Stack>)}
-        </Grid>
-      </Stack>}
-    </Stack>
-  </Modal>;
+  return createPortal(
+    <div ref={shellRef} className="journey-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <header className="journey-header">
+        <Inline gap="small" align="center">
+          <IconButton icon="close" variant="tertiary" size="small" aria-label="Close and discard" onClick={onCancel} />
+          <Text size="md" weight="semibold"><span id={titleId}>Use a Template</span></Text>
+          <Text size="sm" color="secondary">{template.name}</Text>
+        </Inline>
+        <Inline gap="small" align="center">
+          <Button kind="secondary" disabled={loading} onClick={() => setShowTaggerNote(true)}>Edit Envelope</Button>
+          <ComboButton variant="primary" dropdownLabel="More send options" onClick={send} disabled={loading}>{loading ? 'Sending…' : 'Send'}</ComboButton>
+        </Inline>
+      </header>
+      <main className="journey-main">
+        <div className="quicksend-body">
+          <Stack gap="large">
+            {status === 'error' && <Alert kind="danger" title="We couldn’t send the envelope" action={{ label: 'Try again', onClick: send }}>Something went wrong on our side. Your answers are still here.</Alert>}
+            {showTaggerNote && <Alert kind="information" title="Field tagging comes next" action={{ label: 'Dismiss', onClick: () => setShowTaggerNote(false) }}>Edit Envelope will open the document tagger in the next step of this prototype.</Alert>}
+            <Stack gap="medium">
+              <Heading level={2}>Add recipients</Heading>
+              <Card radius="small"><Card.Body>
+                <Stack gap="medium">
+                  <Text size="md" weight="semibold">I-9 Verification</Text>
+                  <Grid columns={2} gap="medium">
+                    <Input label="Employee Name" required placeholder="Jordan Ellis" value={form.recipientName} error={errors.recipientName} onChange={event => { setForm(current => ({ ...current, recipientName: event.target.value })); setErrors(current => ({ ...current, recipientName: undefined })); }} />
+                    <Input label="Delivery" required type="email" placeholder="jordan.ellis@example.com" description="Email" value={form.recipientEmail} error={errors.recipientEmail} onChange={event => { setForm(current => ({ ...current, recipientEmail: event.target.value })); setErrors(current => ({ ...current, recipientEmail: undefined })); }} />
+                  </Grid>
+                  <Select label="Verification Method" value={form.method} onChange={event => setForm(current => ({ ...current, method: event.target.value }))}>
+                    {VERIFICATION_METHODS.map(method => <option key={method} value={method}>{method}</option>)}
+                  </Select>
+                </Stack>
+              </Card.Body></Card>
+            </Stack>
+            <Stack gap="medium">
+              <Inline justify="between" align="center">
+                <Heading level={2}>Add message</Heading>
+                <Button kind="tertiary" size="small" onClick={() => setMessageOpen(open => !open)}>{messageOpen ? 'Collapse' : 'Expand'}</Button>
+              </Inline>
+              {messageOpen && <Stack gap="medium">
+                <Checkbox label="Custom email and language for each recipient" checked={form.customEmail} onChange={event => setForm(current => ({ ...current, customEmail: event.target.checked }))} />
+                <Input label="Email Subject" maxLength={100} value={form.subject} description={`${100 - form.subject.length} characters remaining`} onChange={event => setForm(current => ({ ...current, subject: event.target.value }))} />
+                <Input label="Email Message" multiline rows={6} maxLength={10000} value={form.message} description={`${10000 - form.message.length} characters remaining`} onChange={event => setForm(current => ({ ...current, message: event.target.value }))} />
+              </Stack>}
+            </Stack>
+          </Stack>
+          <aside className="quicksend-rail" aria-label="Document preview">
+            <div className="quicksend-thumb">
+              <Icon name="document" size="medium" />
+              <Text size="sm" weight="semibold">Form I-9</Text>
+              <Text size="xs" color="secondary">Section 1 for the employee</Text>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>,
+    document.body,
+  );
 }
 
 function I9Journey({ session, setSession, onExit, onFinish }: {
@@ -2483,7 +2507,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     {(isEnvelope || view === 'elastic-templates') ? <Tabs className="template-screen-tabs" value={view === 'elastic-templates' ? 'elastic-template-list' : 'envelope-template-list'} onChange={tab => { onSearchChange(''); onNavigate(tab === 'elastic-template-list' ? 'elastic-templates' : 'my-templates'); }} tabs={[
       { id: 'envelope-template-list', label: 'Templates', content: list }, { id: 'elastic-template-list', label: 'Elastic Templates', content: list },
     ]} /> : list}
-    {i9Phase === 'setup' && i9Template && <I9SetupDialog template={i9Template} onCancel={() => setI9Phase('closed')} onStart={setup => {
+    {i9Phase === 'setup' && i9Template && <QuickSend template={i9Template} onCancel={() => setI9Phase('closed')} onStart={setup => {
       setI9Session({ ...setup, step: 0, personal: { firstName: '', lastName: '', otherNames: '', dob: '', address: '', city: '', state: '', zip: '', email: setup.recipientEmail, phone: '' }, authorization: { status: '', aNumber: '', expires: '' }, attested: false, signature: '' });
       setI9Phase('journey');
     }} />}

@@ -594,3 +594,8 @@ img, svg { display: block; max-width: 100%; }
   .journey-main { padding-block: var(--ink-spacing-300); }
   .journey-step-title { font-size: var(--ink-font-heading-s-size, 22px); }
 }
+
+/* Quick Send */
+.quicksend-body { max-width: 1040px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: var(--ink-spacing-500, 40px); align-items: start; }
+.quicksend-thumb { display: flex; flex-direction: column; align-items: center; gap: var(--ink-spacing-100); padding: var(--ink-spacing-500, 40px) var(--ink-spacing-200); border: var(--ink-border-width-xs, 1px) solid var(--ink-border-color-subtle); border-radius: var(--ink-radius-200, 8px); background: var(--ink-bg-color-subtle, #f8f8f8); }
+@media (max-width: 860px) { .quicksend-body { grid-template-columns: minmax(0, 1fr); } .quicksend-rail { display: none; } }
