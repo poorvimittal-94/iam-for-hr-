@@ -254,7 +254,7 @@ type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | '
 type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ════════════════════════����══════════════
+/* ═════════════════�����══════����══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -1730,7 +1730,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
 
 /* ═══════════════════════════════════════
    Requests Data (matches real DocuSign)
-   ═══════════════════════════════════════ */
+   ════════════════════════════���═��═��══════ */
 
 interface RequestItem {
   id: string;
@@ -2049,12 +2049,31 @@ interface I9Session extends I9Setup {
   personal: { firstName: string; lastName: string; otherNames: string; dob: string; address: string; city: string; state: string; zip: string; email: string; phone: string };
   authorization: { status: '' | 'citizen' | 'national' | 'permanent' | 'authorized'; aNumber: string; expires: string };
   attested: boolean; signature: string; submittedAt?: string;
+  section2?: I9Section2Data;
+}
+interface I9Document { title: string; authority: string; number: string; expires: string }
+interface I9Section2Data {
+  step: number; route: '' | 'a' | 'bc'; docs: Record<'a' | 'b' | 'c', I9Document>;
+  repTitle: string; attested: boolean; signature: string; completedAt?: string;
 }
 
-const I9_STEPS = [
-  { id: 'instructions', title: 'Instructions' }, { id: 'personal', title: 'Personal information' }, { id: 'authorization', title: 'Work authorization' },
-  { id: 'review', title: 'Review' }, { id: 'sign', title: 'Sign' }, { id: 'complete', title: 'Complete' },
+const EMPTY_I9_DOCUMENT: I9Document = { title: '', authority: '', number: '', expires: '' };
+const EMPTY_SECTION2: I9Section2Data = { step: 0, route: '', docs: { a: EMPTY_I9_DOCUMENT, b: EMPTY_I9_DOCUMENT, c: EMPTY_I9_DOCUMENT }, repTitle: '', attested: false, signature: '' };
+const I9_SECTION2_STEPS = [
+  { id: 'review', title: 'Review Section 1' }, { id: 'documents', title: 'Verify documents' }, { id: 'sign', title: 'Sign' }, { id: 'complete', title: 'Complete' },
 ];
+const I9_DOCUMENT_LISTS: Record<'a' | 'b' | 'c', { label: string; titles: string[] }> = {
+  a: { label: 'List A', titles: ['U.S. passport or passport card', 'Permanent Resident Card (Form I-551)', 'Employment Authorization Document (Form I-766)', 'Foreign passport with Form I-94'] },
+  b: { label: 'List B', titles: ['Driver’s license', 'State-issued ID card', 'School ID card with photograph', 'Voter registration card'] },
+  c: { label: 'List C', titles: ['Social Security account number card', 'Birth certificate issued by a state or local authority', 'Certification of report of birth (Form FS-545)'] },
+};
+function addBusinessDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00`);
+  let remaining = days;
+  while (remaining > 0) { date.setDate(date.getDate() + 1); if (date.getDay() !== 0 && date.getDay() !== 6) remaining -= 1; }
+  return date.toISOString().slice(0, 10);
+}
+
 const US_STATES = 'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split(' ');
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const I9_AUTHORIZATION_OPTIONS: { value: Exclude<I9Session['authorization']['status'], ''>; label: string; description: string }[] = [
@@ -2147,230 +2166,776 @@ function JourneyHeading({ title, description }: { title: string; description?: s
   </Stack>;
 }
 
-function I9SetupDialog({ template, onCancel, onStart }: { template: TemplateItem; onCancel: () => void; onStart: (setup: I9Setup) => void }) {
-  const [stage, setStage] = useState<'form' | 'review'>('form');
-  const [form, setForm] = useState<I9Setup>({ recipientName: '', recipientEmail: '', startDate: '', employerName: '', employerEmail: '', message: '', expiresInDays: '7' });
-  const [errors, setErrors] = useState<Partial<Record<keyof I9Setup, string>>>({});
+const VERIFICATION_METHODS = ['Verification On-Demand (OneNotary)', 'In-person', 'Employee Designated'];
+const QUICK_SEND_DEFAULT_MESSAGE = 'Hello,\n\nPlease complete Section 1 of your Form I-9 so we can verify your identity and work authorization before your first day.\n\nThank you,\nPeople Team';
+
+function QuickSend({ template, onCancel, onStart }: { template: TemplateItem; onCancel: () => void; onStart: (setup: I9Setup) => void }) {
+  const [form, setForm] = useState({ recipientName: '', recipientEmail: '', method: VERIFICATION_METHODS[0], customEmail: false, subject: 'Please complete your Form I-9', message: QUICK_SEND_DEFAULT_MESSAGE });
+  const [errors, setErrors] = useState<{ recipientName?: string; recipientEmail?: string }>({});
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [showTaggerNote, setShowTaggerNote] = useState(false);
+  const [messageOpen, setMessageOpen] = useState(true);
   const attempts = useRef(0);
   const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef(onCancel);
+  exitRef.current = onCancel;
+  const titleId = useId();
   const loading = status === 'loading';
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    shellRef.current?.querySelector<HTMLElement>('input')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !Array.from(document.querySelectorAll('[aria-modal="true"]')).some(node => node !== shellRef.current)) exitRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = previousOverflow; opener?.focus?.(); };
+  }, []);
 
-  const update = (key: keyof I9Setup) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setForm(current => ({ ...current, [key]: event.target.value }));
-    setErrors(current => ({ ...current, [key]: undefined }));
-  };
-  const validate = () => {
-    const next: Partial<Record<keyof I9Setup, string>> = {};
-    if (!form.recipientName.trim()) next.recipientName = 'Enter the new hire’s full name.';
-    if (!form.recipientEmail.trim()) next.recipientEmail = 'Enter the new hire’s email address.';
-    else if (!EMAIL_PATTERN.test(form.recipientEmail)) next.recipientEmail = 'Enter a valid email address, like name@company.com.';
-    if (!form.startDate) next.startDate = 'Choose the employee’s first day of work.';
-    if (!form.employerName.trim()) next.employerName = 'Enter the employer representative’s name.';
-    if (!form.employerEmail.trim()) next.employerEmail = 'Enter the employer representative’s email address.';
-    else if (!EMAIL_PATTERN.test(form.employerEmail)) next.employerEmail = 'Enter a valid email address, like name@company.com.';
-    else if (form.employerEmail.trim().toLowerCase() === form.recipientEmail.trim().toLowerCase()) next.employerEmail = 'The employer representative needs a different email than the new hire.';
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
-  const start = () => {
+  const send = () => {
     if (loading) return;
+    const next: typeof errors = {};
+    if (!form.recipientName.trim()) next.recipientName = 'Enter the employee’s full name.';
+    if (!form.recipientEmail.trim()) next.recipientEmail = 'Enter the employee’s email address.';
+    else if (!EMAIL_PATTERN.test(form.recipientEmail)) next.recipientEmail = 'Enter a valid email address, like name@company.com.';
+    setErrors(next);
+    if (Object.keys(next).length) return;
     setStatus('loading');
     timer.current = window.setTimeout(() => {
       attempts.current += 1;
       if (demoFlag('i9') === 'setup-error' && attempts.current === 1) { setStatus('error'); return; }
-      onStart(form);
+      onStart({ recipientName: form.recipientName, recipientEmail: form.recipientEmail, startDate: new Date().toISOString().slice(0, 10), employerName: 'Akshat Mishra', employerEmail: 'akshat.mishra@example.com', message: form.message, expiresInDays: '7' });
     }, 900);
   };
 
-  return <Modal open onClose={onCancel} title={stage === 'form' ? 'Set up Form I-9' : 'Review before starting'} size="large" closeOnEscape={!loading} closeOnBackdropClick={!loading}
-    footer={<Inline justify="end" gap="small">
-      {stage === 'form'
-        ? <><Button kind="secondary" onClick={onCancel}>Cancel</Button><Button kind="primary" onClick={() => { if (validate()) setStage('review'); }}>Continue</Button></>
-        : <><Button kind="secondary" onClick={() => { setStatus('idle'); setStage('form'); }} disabled={loading}>Back</Button><Button kind="secondary" onClick={onCancel} disabled={loading}>Cancel</Button><Button kind="primary" loading={loading} onClick={start}>Start envelope</Button></>}
-    </Inline>}>
-    <Stack gap="large">
-      <Card radius="small"><Card.Body><Inline gap="medium" align="center">
-        <Icon name="document" size="medium" />
-        <Stack gap="none"><Text size="md" weight="semibold">{template.name}</Text><Text size="sm" color="secondary">Section 1 for the employee · Section 2 for the employer · 2 documents</Text></Stack>
-        <Badge kind="success" text="Published" />
-      </Inline></Card.Body></Card>
-      {status === 'error' && <Alert kind="danger" title="We couldn’t start the envelope" action={{ label: 'Try again', onClick: start }}>Something went wrong on our side. Your answers are still here.</Alert>}
-      {stage === 'form' ? <Stack gap="large">
-        <Input label="Sender" value="Akshat Mishra · People Team" readOnly description="The envelope is sent from your account." />
-        <Stack gap="medium">
-          <Text size="md" weight="semibold">Employee (signer)</Text>
-          <Grid columns={2} gap="medium">
-            <Input label="Full name" required placeholder="Jordan Ellis" value={form.recipientName} error={errors.recipientName} onChange={update('recipientName')} />
-            <Input label="Email address" required type="email" placeholder="jordan.ellis@example.com" value={form.recipientEmail} error={errors.recipientEmail} onChange={update('recipientEmail')} />
-          </Grid>
-          <Input label="First day of work" required type="date" value={form.startDate} error={errors.startDate} onChange={update('startDate')} description="Section 1 must be completed by this date." />
-        </Stack>
-        <Stack gap="medium">
-          <Text size="md" weight="semibold">Employer representative</Text>
-          <Grid columns={2} gap="medium">
-            <Input label="Full name" required placeholder="Priya Raman" value={form.employerName} error={errors.employerName} onChange={update('employerName')} />
-            <Input label="Email address" required type="email" placeholder="priya.raman@example.com" value={form.employerEmail} error={errors.employerEmail} onChange={update('employerEmail')} />
-          </Grid>
-        </Stack>
-        <Input label="Message to the employee" multiline rows={3} placeholder="Welcome to the team. Please complete this form before your first day." value={form.message} onChange={update('message')} />
-        <Select label="Link expires after" value={form.expiresInDays} onChange={update('expiresInDays')}>{['3', '7', '14'].map(days => <option key={days} value={days}>{days} days</option>)}</Select>
-      </Stack> : <Stack gap="medium">
-        <Text size="sm" color="secondary">Check the details below. The employee receives a secure link by email.</Text>
-        <Grid columns={2} gap="medium">
-          {([['Sender', 'Akshat Mishra'], ['Employee', `${form.recipientName} · ${form.recipientEmail}`], ['First day of work', formatLongDate(form.startDate)], ['Employer representative', `${form.employerName} · ${form.employerEmail}`], ['Link expires', `${form.expiresInDays} days after sending`], ['Message', form.message || 'No message']] as const).map(([label, value]) =>
-            <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value}</Text></Stack>)}
-        </Grid>
-      </Stack>}
-    </Stack>
-  </Modal>;
+  return createPortal(
+    <div ref={shellRef} className="journey-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <header className="journey-header">
+        <Inline gap="small" align="center">
+          <IconButton icon="close" variant="tertiary" size="small" aria-label="Close and discard" onClick={onCancel} />
+          <Text size="md" weight="semibold"><span id={titleId}>Use a Template</span></Text>
+          <Text size="sm" color="secondary">{template.name}</Text>
+        </Inline>
+        <Inline gap="small" align="center">
+          <Button kind="secondary" disabled={loading} onClick={() => setShowTaggerNote(true)}>Edit Envelope</Button>
+          <ComboButton variant="primary" dropdownLabel="More send options" onClick={send} disabled={loading}>{loading ? 'Sending…' : 'Send'}</ComboButton>
+        </Inline>
+      </header>
+      <main className="journey-main">
+        <div className="quicksend-body">
+          <Stack gap="large">
+            {status === 'error' && <Alert kind="danger" title="We couldn’t send the envelope" action={{ label: 'Try again', onClick: send }}>Something went wrong on our side. Your answers are still here.</Alert>}
+            {showTaggerNote && <Alert kind="information" title="Field tagging comes next" action={{ label: 'Dismiss', onClick: () => setShowTaggerNote(false) }}>Edit Envelope will open the document tagger in the next step of this prototype.</Alert>}
+            <Stack gap="medium">
+              <Heading level={2}>Add recipients</Heading>
+              <Card radius="small"><Card.Body>
+                <Stack gap="medium">
+                  <Text size="md" weight="semibold">I-9 Verification</Text>
+                  <Grid columns={2} gap="medium">
+                    <Input label="Employee Name" required placeholder="Jordan Ellis" value={form.recipientName} error={errors.recipientName} onChange={event => { setForm(current => ({ ...current, recipientName: event.target.value })); setErrors(current => ({ ...current, recipientName: undefined })); }} />
+                    <Input label="Delivery" required type="email" placeholder="jordan.ellis@example.com" description="Email" value={form.recipientEmail} error={errors.recipientEmail} onChange={event => { setForm(current => ({ ...current, recipientEmail: event.target.value })); setErrors(current => ({ ...current, recipientEmail: undefined })); }} />
+                  </Grid>
+                  <Select label="Verification Method" value={form.method} onChange={event => setForm(current => ({ ...current, method: event.target.value }))}>
+                    {VERIFICATION_METHODS.map(method => <option key={method} value={method}>{method}</option>)}
+                  </Select>
+                </Stack>
+              </Card.Body></Card>
+            </Stack>
+            <Stack gap="medium">
+              <Inline justify="between" align="center">
+                <Heading level={2}>Add message</Heading>
+                <Button kind="tertiary" size="small" onClick={() => setMessageOpen(open => !open)}>{messageOpen ? 'Collapse' : 'Expand'}</Button>
+              </Inline>
+              {messageOpen && <Stack gap="medium">
+                <Checkbox label="Custom email and language for each recipient" checked={form.customEmail} onChange={event => setForm(current => ({ ...current, customEmail: event.target.checked }))} />
+                <Input label="Email Subject" maxLength={100} value={form.subject} description={`${100 - form.subject.length} characters remaining`} onChange={event => setForm(current => ({ ...current, subject: event.target.value }))} />
+                <Input label="Email Message" multiline rows={6} maxLength={10000} value={form.message} description={`${10000 - form.message.length} characters remaining`} onChange={event => setForm(current => ({ ...current, message: event.target.value }))} />
+              </Stack>}
+            </Stack>
+          </Stack>
+          <aside className="quicksend-rail" aria-label="Document preview">
+            <div className="quicksend-thumb">
+              <Icon name="document" size="medium" />
+              <Text size="sm" weight="semibold">Form I-9</Text>
+              <Text size="xs" color="secondary">Section 1 for the employee</Text>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>,
+    document.body,
+  );
 }
 
-function I9Journey({ session, setSession, onExit, onFinish }: {
+interface I9DocData {
+  lastName: string; firstName: string; middleInitial: string; otherNames: string; address: string; apt: string; city: string; state: string; zip: string;
+  dob: string; ssn: string; email: string; phone: string;
+  status: I9Session['authorization']['status'];
+  aNumber: string; expires: string; authNumber: string; i94: string; passport: string; passportCountry: string;
+  noPreparer: boolean; signature: string; signedDate: string;
+}
+const EMPTY_I9_DOC: I9DocData = {
+  lastName: '', firstName: '', middleInitial: '', otherNames: '', address: '', apt: '', city: '', state: '', zip: '', dob: '', ssn: '', email: '', phone: '',
+  status: '', aNumber: '', expires: '', authNumber: '', i94: '', passport: '', passportCountry: '', noPreparer: false, signature: '', signedDate: '',
+};
+const I9_DOC_PAGE_COUNT = 2;
+
+function i9DocumentName(session: I9Session) { return `I-9 Verification_${session.recipientName.replace(/\s+/g, '') || 'Employee'}.pdf`; }
+function formatMdY(date: Date) { return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`; }
+function parseMdY(value: string) {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const date = new Date(Number(match[3]), Number(match[1]) - 1, Number(match[2]));
+  return date.getMonth() === Number(match[1]) - 1 && date.getDate() === Number(match[2]) ? date : null;
+}
+function toIsoDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+
+function I9EmailNotification({ session, onReview, onClose }: { session: I9Session; onReview: () => void; onClose: () => void }) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef(onClose);
+  exitRef.current = onClose;
+  const titleId = useId();
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    shellRef.current?.querySelector<HTMLElement>('[data-i9-review]')?.focus();
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') exitRef.current(); };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = previousOverflow; opener?.focus?.(); };
+  }, []);
+  const keep = (event: React.MouseEvent) => event.preventDefault();
+
+  return createPortal(
+    <div ref={shellRef} className="i9-email-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div className="i9-email-bar">
+        <Stack gap="none">
+          <span className="i9-inverse-strong">Recipient inbox preview</span>
+          <span className="i9-inverse">{`To: ${session.recipientName} <${session.recipientEmail}>`}</span>
+        </Stack>
+        <Button kind="secondary" size="small" onClick={onClose}>Close preview</Button>
+      </div>
+      <article className="i9-email">
+        <div className="i9-email-body">
+          <div className="i9-email-logo"><img src={`${import.meta.env.BASE_URL}docusign-logo.svg`} height={24} alt="Docusign" /></div>
+          <Stack gap="medium">
+            <h1 className="i9-email-title" id={titleId}>{`${session.employerName} sent you a document to review and sign`}</h1>
+            <Text size="md">To start the I-9 verification process, review and sign the attached document. This must be completed before or during your first day of employment.</Text>
+            <Text size="md">Then, to verify your identity, you must meet with an authorized representative online using our trusted partner, OneNotary.</Text>
+            <Text size="md" weight="semibold">To join a OneNotary session, you’ll need:</Text>
+            <ol className="i9-email-list">
+              <li><Text size="md">A computer or smartphone with a working camera and microphone</Text></li>
+              <li><Text size="md">Your valid government-issued photo ID</Text></li>
+              <li><Text size="md">To show or upload your work-authorization documents</Text></li>
+            </ol>
+            <Text size="md">The entire verification process must be completed before the end of your third day in employment.</Text>
+            <div className="i9-email-attachment">
+              <Stack gap="medium">
+                <Text size="md" weight="semibold">{i9DocumentName(session)}</Text>
+                <div><Button kind="primary" data-i9-review onClick={onReview}>Review Document</Button></div>
+              </Stack>
+            </div>
+          </Stack>
+        </div>
+        <div className="i9-email-notes">
+          <Stack gap="medium">
+            <Stack gap="small"><Text size="sm" weight="semibold">Don’t share this email</Text><Text size="sm">Don’t share this email or its links. This email has the link you need to join the OneNotary session for this envelope.</Text></Stack>
+            <Stack gap="small"><Text size="sm" weight="semibold">Stop receiving emails</Text><Text size="sm">{`This message was sent to you by ${session.employerName} who is using the Docusign Electronic Signature Service. If you would rather not receive email from this sender you may contact the sender with your request.`}</Text></Stack>
+            <Stack gap="small"><Text size="sm" weight="semibold">Questions</Text><Text size="sm">{`If you have questions about the purpose of the OneNotary session, ask ${session.employerName}.`}</Text><Link href="#i9-email" size="small" onClick={keep}>Docusign Privacy Policy</Link></Stack>
+          </Stack>
+        </div>
+        <div className="i9-email-footer">
+          <Inline gap="medium" wrap><Link href="#i9-email" size="small" onClick={keep}>Unsubscribe</Link><Link href="#i9-email" size="small" onClick={keep}>Contact Us</Link><Link href="#i9-email" size="small" onClick={keep}>Terms of Use</Link><Link href="#i9-email" size="small" onClick={keep}>Privacy</Link><Link href="#i9-email" size="small" onClick={keep}>Report Email</Link></Inline>
+          <Text size="xs" color="secondary">Copyright © 2026 Docusign, Inc. All rights reserved.</Text>
+        </div>
+      </article>
+    </div>,
+    document.body,
+  );
+}
+
+function I9Cell({ span, label, error, children }: { span: number; label?: string; error?: string; children: React.ReactNode }) {
+  return <div className="i9-cell" style={{ gridColumn: `span ${span}` }}>
+    {label && <span className="i9-cell-label">{label}</span>}
+    {children}
+    {error && <span className="i9-doc-error" role="alert">{error}</span>}
+  </div>;
+}
+
+function I9DocField({ name, label, value, onChange, error, required, disabled, placeholder, maxLength, inputMode }: {
+  name: string; label: string; value: string; onChange: (value: string) => void; error?: string; required?: boolean; disabled?: boolean;
+  placeholder?: string; maxLength?: number; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+}) {
+  return <input className={`i9-doc-field${error ? ' is-error' : ''}`} data-field={name} aria-label={label} aria-required={required} aria-invalid={!!error} disabled={disabled}
+    placeholder={placeholder ?? `${label}${required ? ' *' : ''}`} value={value} maxLength={maxLength} inputMode={inputMode} autoComplete="off" onChange={event => onChange(event.target.value)} />;
+}
+
+function I9DocumentSigning({ session, onClose, onComplete }: {
+  session: I9Session; onClose: () => void; onComplete: (next: I9Session, action: 'later' | 'verify') => void;
+}) {
+  const [data, setData] = useState<I9DocData>({ ...EMPTY_I9_DOC, email: session.recipientEmail });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
+  const [zoom, setZoom] = useState(100);
+  const [signOpen, setSignOpen] = useState(false);
+  const [signName, setSignName] = useState('');
+  const [signError, setSignError] = useState('');
+  const [finishing, setFinishing] = useState(false);
+  const [completed, setCompleted] = useState<I9Session | null>(null);
+  const [showDocs, setShowDocs] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const titleId = useId();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; opener?.focus?.(); };
+  }, []);
+
+  const set = <K extends keyof I9DocData>(key: K) => (value: I9DocData[K]) => { setData(current => ({ ...current, [key]: value })); setErrors(current => ({ ...current, [key]: '' })); };
+  const goToPage = (next: number) => { setPage(Math.min(I9_DOC_PAGE_COUNT, Math.max(1, next))); shellRef.current?.querySelector('.i9-doc-scroll')?.scrollTo({ top: 0 }); };
+  const documentName = i9DocumentName(session);
+  const fieldsFor = (name: string) => ({ value: data[name as keyof I9DocData] as string, onChange: set(name as keyof I9DocData) as (value: string) => void, error: errors[name], name });
+
+  const validate = () => {
+    const next: Record<string, string> = {};
+    const need = (key: keyof I9DocData, message: string) => { if (!String(data[key]).trim()) next[key] = message; };
+    need('lastName', 'Enter your last name.'); need('firstName', 'Enter your first name.'); need('address', 'Enter your street address.'); need('city', 'Enter your city.');
+    if (!data.state) next.state = 'Choose a state.';
+    if (!/^\d{5}$/.test(data.zip)) next.zip = 'Enter a 5-digit ZIP code.';
+    const dob = parseMdY(data.dob);
+    if (!dob) next.dob = 'Use mm/dd/yyyy.'; else if (dob >= new Date()) next.dob = 'Must be in the past.';
+    if (data.ssn && !/^\d{3}-?\d{2}-?\d{4}$/.test(data.ssn.trim())) next.ssn = 'Use 9 digits, like 000-00-0000.';
+    if (!EMAIL_PATTERN.test(data.email)) next.email = 'Enter a valid email address.';
+    if (!data.status) next.status = 'Check one box to attest your status.';
+    if (data.status === 'permanent' && !/^A?-?\d{7,9}$/i.test(data.aNumber.trim())) next.aNumber = 'Enter your A-Number, like A123456789.';
+    if (data.status === 'authorized') {
+      const expires = parseMdY(data.expires);
+      if (!data.expires.trim()) next.expires = 'Enter a date or N/A.';
+      else if (data.expires.trim().toUpperCase() !== 'N/A' && (!expires || expires <= new Date())) next.expires = 'Use a future date, mm/dd/yyyy.';
+      if (!data.authNumber.trim() && !data.i94.trim() && !data.passport.trim()) next.authNumber = 'Enter one document number.';
+      if (data.passport.trim() && !data.passportCountry.trim()) next.passportCountry = 'Enter the country of issuance.';
+    }
+    if (!data.signature) next.signature = 'Sign the form.';
+    if (!parseMdY(data.signedDate)) next.signedDate = 'Use mm/dd/yyyy.';
+    if (!data.noPreparer) next.noPreparer = 'Confirm that you did not use a preparer or translator.';
+    return next;
+  };
+
+  const finish = () => {
+    if (finishing) return;
+    const next = validate();
+    setErrors(next);
+    if (Object.keys(next).length) {
+      goToPage(1);
+      window.setTimeout(() => {
+        const first = shellRef.current?.querySelector<HTMLElement>('.i9-doc-field.is-error, .i9-check-row.is-error input, .i9-sign-btn.is-error');
+        first?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        first?.focus({ preventScroll: true });
+      }, 50);
+      return;
+    }
+    setFinishing(true);
+    timer.current = window.setTimeout(() => {
+      setFinishing(false);
+      const expires = parseMdY(data.expires);
+      setCompleted({
+        ...session, step: 5, attested: true, signature: data.signature,
+        submittedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }),
+        personal: { firstName: data.firstName, lastName: data.lastName, otherNames: data.otherNames, dob: toIsoDate(parseMdY(data.dob)!), address: data.apt ? `${data.address}, ${data.apt}` : data.address, city: data.city, state: data.state, zip: data.zip, email: data.email, phone: data.phone },
+        authorization: { status: data.status, aNumber: data.aNumber || data.authNumber || data.i94 || data.passport, expires: expires ? toIsoDate(expires) : '' },
+      });
+    }, 800);
+  };
+
+  const openSign = () => { setSignName(data.signature || `${data.firstName} ${data.lastName}`.trim()); setSignError(''); setSignOpen(true); };
+  const adoptSignature = () => {
+    if (!signName.trim()) { setSignError('Type your full name to sign.'); return; }
+    setData(current => ({ ...current, signature: signName.trim(), signedDate: current.signedDate || formatMdY(new Date()) }));
+    setErrors(current => ({ ...current, signature: '', signedDate: '' }));
+    setSignOpen(false);
+  };
+  const statusOptions: { value: Exclude<I9DocData['status'], ''>; label: string }[] = [
+    { value: 'citizen', label: '1. A citizen of the United States' },
+    { value: 'national', label: '2. A noncitizen national of the United States (See instructions)' },
+    { value: 'permanent', label: '3. A lawful permanent resident (Alien Registration Number/USCIS Number):' },
+    { value: 'authorized', label: '4. An alien authorized to work until (expiration date, if applicable, mm/dd/yyyy):' },
+  ];
+  const errorList = Object.values(errors).filter(Boolean);
+
+  return <>
+    {createPortal(
+      <div ref={shellRef} className="journey-shell i9-doc-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <header className="i9-doc-topbar">
+          <Inline gap="medium" align="center">
+            <IconButton icon="arrow-left" variant="tertiary" size="small" aria-label="Back to email" onClick={() => setConfirmLeave(true)} />
+            <span className="i9-doc-divider" aria-hidden="true" />
+            <span className="i9-inverse" id={titleId}>{documentName}</span>
+          </Inline>
+          <Button kind="primary" loading={finishing} onClick={finish}>Finish</Button>
+        </header>
+        <div className="i9-doc-toolbar" role="toolbar" aria-label="Document viewer">
+          <Inline gap="small" align="center">
+            <input className="i9-page-input" type="number" min={1} max={I9_DOC_PAGE_COUNT} aria-label="Page number" value={page} onChange={event => goToPage(Number(event.target.value) || 1)} />
+            <Text size="sm">{`of ${I9_DOC_PAGE_COUNT}`}</Text>
+            <IconButton icon="chevron-down" variant="tertiary" size="small" aria-label="Next page" disabled={page === I9_DOC_PAGE_COUNT} onClick={() => goToPage(page + 1)} />
+            <IconButton icon="chevron-up" variant="tertiary" size="small" aria-label="Previous page" disabled={page === 1} onClick={() => goToPage(page - 1)} />
+          </Inline>
+          <span className="i9-doc-divider" aria-hidden="true" />
+          <Inline gap="small" align="center">
+            <IconButton icon="zoom-in" variant="tertiary" size="small" aria-label="Zoom in" disabled={zoom >= 130} onClick={() => setZoom(value => value + 10)} />
+            <Text size="sm">{`${zoom}%`}</Text>
+            <IconButton icon="zoom-out" variant="tertiary" size="small" aria-label="Zoom out" disabled={zoom <= 70} onClick={() => setZoom(value => value - 10)} />
+          </Inline>
+        </div>
+        <main className="i9-doc-scroll">
+          {errorList.length > 0 && <div className="i9-doc-alert"><Alert kind="danger" title={`${errorList.length} ${errorList.length === 1 ? 'field needs' : 'fields need'} attention`}>Complete the highlighted fields on the document, then select Finish.</Alert></div>}
+          <div className="i9-doc-page" style={{ ['--i9-zoom' as string]: zoom / 100 }}>
+            {page === 1 ? <>
+              <div className="i9-doc-head">
+                <div className="i9-doc-head-title"><strong>Employment Eligibility Verification</strong><strong>Department of Homeland Security</strong><span>U.S. Citizenship and Immigration Services</span></div>
+                <div className="i9-doc-head-form"><strong>USCIS Form I-9</strong><span>OMB No. 1615-0047</span><span>Expires 05/31/2027</span></div>
+              </div>
+              <div className="i9-doc-rule" />
+              <p className="i9-doc-fine"><strong>START HERE: Read instructions carefully before completing this form.</strong> The instructions must be available, either in paper or electronically, during completion of this form. Employers are liable for errors in the completion of this form.</p>
+              <p className="i9-doc-fine"><strong>ANTI-DISCRIMINATION NOTICE:</strong> It is illegal to discriminate against work-authorized individuals. Employers <strong>CANNOT</strong> specify which document(s) an employee may present to establish employment authorization and identity.</p>
+              <div className="i9-band"><strong>Section 1. Employee Information and Attestation</strong> <em>(Employees must complete and sign Section 1 of Form I-9 no later than the first day of employment, but not before accepting a job offer.)</em></div>
+              <div className="i9-grid">
+                <I9Cell span={4} label="Last Name (Family Name)" error={errors.lastName}><I9DocField label="Last Name" required {...fieldsFor('lastName')} /></I9Cell>
+                <I9Cell span={4} label="First Name (Given Name)" error={errors.firstName}><I9DocField label="First Name" required {...fieldsFor('firstName')} /></I9Cell>
+                <I9Cell span={1} label="Middle Initial"><I9DocField label="Middle initial" placeholder="" maxLength={1} {...fieldsFor('middleInitial')} /></I9Cell>
+                <I9Cell span={3} label="Other Last Names Used (if any)"><I9DocField label="Other last names used" placeholder="" {...fieldsFor('otherNames')} /></I9Cell>
+                <I9Cell span={5} label="Address (Street Number and Name)" error={errors.address}><I9DocField label="Address" required {...fieldsFor('address')} /></I9Cell>
+                <I9Cell span={1} label="Apt. Number"><I9DocField label="Apt. number" placeholder="" {...fieldsFor('apt')} /></I9Cell>
+                <I9Cell span={2} label="City or Town" error={errors.city}><I9DocField label="City or town" required placeholder="City *" {...fieldsFor('city')} /></I9Cell>
+                <I9Cell span={2} label="State" error={errors.state}>
+                  <select className={`i9-doc-field${errors.state ? ' is-error' : ''}`} data-field="state" aria-label="State" aria-required="true" aria-invalid={!!errors.state} value={data.state} onChange={event => set('state')(event.target.value)}>
+                    <option value="">State *</option>{US_STATES.map(code => <option key={code} value={code}>{code}</option>)}
+                  </select>
+                </I9Cell>
+                <I9Cell span={2} label="ZIP Code" error={errors.zip}><I9DocField label="ZIP code" required placeholder="ZIP *" maxLength={5} inputMode="numeric" {...fieldsFor('zip')} /></I9Cell>
+                <I9Cell span={3} label="Date of Birth (mm/dd/yyyy)" error={errors.dob}><I9DocField label="Date of birth" required placeholder="DOB *" maxLength={10} inputMode="numeric" {...fieldsFor('dob')} /></I9Cell>
+                <I9Cell span={3} label="U.S. Social Security Number" error={errors.ssn}><I9DocField label="U.S. Social Security Number" placeholder="000-00-0000" maxLength={11} inputMode="numeric" {...fieldsFor('ssn')} /></I9Cell>
+                <I9Cell span={3} label="Employee’s E-mail Address" error={errors.email}><I9DocField label="Email" required placeholder="Email *" {...fieldsFor('email')} /></I9Cell>
+                <I9Cell span={3} label="Employee’s Telephone Number"><I9DocField label="Telephone number" placeholder="" inputMode="tel" {...fieldsFor('phone')} /></I9Cell>
+              </div>
+              <p className="i9-doc-bold">I am aware that federal law provides for imprisonment and/or fines for false statements or use of false documents in connection with the completion of this form.</p>
+              <p className="i9-doc-bold">I attest, under penalty of perjury, that I am (check one of the following boxes):</p>
+              <fieldset className={`i9-status${errors.status ? ' is-error' : ''}`}>
+                <legend className="sr-only">Citizenship and work authorization status</legend>
+                {statusOptions.map(option => <div className={`i9-check-row${errors.status ? ' is-error' : ''}`} key={option.value}>
+                  <Checkbox label={option.label} checked={data.status === option.value} onChange={() => { setData(current => ({ ...current, status: current.status === option.value ? '' : option.value })); setErrors(current => ({ ...current, status: '', aNumber: '', expires: '', authNumber: '', passportCountry: '' })); }} />
+                  {option.value === 'permanent' && <div className="i9-inline-field"><I9DocField label="Alien Registration Number/USCIS Number" placeholder="A-Number" required={data.status === 'permanent'} disabled={data.status !== 'permanent'} {...fieldsFor('aNumber')} />{errors.aNumber && <span className="i9-doc-error" role="alert">{errors.aNumber}</span>}</div>}
+                  {option.value === 'authorized' && <div className="i9-inline-field"><I9DocField label="Work authorization expiration date" placeholder="mm/dd/yyyy or N/A" maxLength={10} required={data.status === 'authorized'} disabled={data.status !== 'authorized'} {...fieldsFor('expires')} />{errors.expires && <span className="i9-doc-error" role="alert">{errors.expires}</span>}</div>}
+                </div>)}
+                {errors.status && <span className="i9-doc-error" role="alert">{errors.status}</span>}
+              </fieldset>
+              <div className="i9-alien">
+                <p className="i9-doc-fine"><em>Aliens authorized to work must provide only one of the following document numbers to complete Form I-9: An Alien Registration Number/USCIS Number OR Form I-94 Admission Number OR Foreign Passport Number.</em></p>
+                <div className="i9-alien-row"><span>1. Alien Registration Number/USCIS Number:</span><I9DocField label="Alien Registration Number/USCIS Number (alien authorized to work)" placeholder="" disabled={data.status !== 'authorized'} {...fieldsFor('authNumber')} /></div>
+                <strong className="i9-or">OR</strong>
+                <div className="i9-alien-row"><span>2. Form I-94 Admission Number:</span><I9DocField label="Form I-94 Admission Number" placeholder="" disabled={data.status !== 'authorized'} {...fieldsFor('i94')} /></div>
+                <strong className="i9-or">OR</strong>
+                <div className="i9-alien-row"><span>3. Foreign Passport Number:</span><I9DocField label="Foreign Passport Number" placeholder="" disabled={data.status !== 'authorized'} {...fieldsFor('passport')} /></div>
+                <div className="i9-alien-row"><span>Country of Issuance:</span><I9DocField label="Country of Issuance" placeholder="" disabled={data.status !== 'authorized'} {...fieldsFor('passportCountry')} /></div>
+                {errors.authNumber && <span className="i9-doc-error" role="alert">{errors.authNumber}</span>}
+                {errors.passportCountry && <span className="i9-doc-error" role="alert">{errors.passportCountry}</span>}
+              </div>
+              <div className="i9-grid i9-sign-grid">
+                <I9Cell span={8} label="Signature of Employee" error={errors.signature}>
+                  {data.signature
+                    ? <button type="button" className="i9-signature" aria-label={`Signed as ${data.signature}. Change signature`} onClick={openSign}>{data.signature}</button>
+                    : <div><Button kind="primary" className={`i9-sign-btn${errors.signature ? ' is-error' : ''}`} startElement={<Icon name="pencil" size="small" />} onClick={openSign}>Sign</Button></div>}
+                </I9Cell>
+                <I9Cell span={4} label="Today’s Date (mm/dd/yyyy)" error={errors.signedDate}><I9DocField label="Today’s date" required placeholder="mm/dd/yyyy" maxLength={10} inputMode="numeric" {...fieldsFor('signedDate')} /></I9Cell>
+              </div>
+              <div className="i9-band"><strong>Preparer and/or Translator Certification (check one):</strong>
+                <div className={`i9-check-row${errors.noPreparer ? ' is-error' : ''}`}>
+                  <Checkbox label="I did not use a preparer or translator. A preparer(s) and/or translator(s) assisted the employee in completing Section 1." checked={data.noPreparer} onChange={event => set('noPreparer')(event.target.checked)} />
+                </div>
+                {errors.noPreparer && <span className="i9-doc-error" role="alert">{errors.noPreparer}</span>}
+                <em>(Fields below must be completed and signed when preparers and/or translators assist an employee in completing Section 1.)</em>
+              </div>
+              <div className="i9-stop"><span>Employer Completes Next Page</span></div>
+              <div className="i9-doc-footer"><span>Form I-9 05/31/2027</span><span>{`Page 1 of ${I9_DOC_PAGE_COUNT}`}</span></div>
+            </> : <>
+              <div className="i9-band"><strong>Section 2. Employer or Authorized Representative Review and Verification</strong> <em>(Employers or their authorized representative must complete and sign Section 2 within 3 business days of the employee’s first day of employment.)</em></div>
+              <Alert kind="information" title="Completed by your employer">Your employer reviews your documents during identity verification and completes this section. You don’t need to fill anything out on this page.</Alert>
+              <div className="i9-grid i9-locked" aria-hidden="true">
+                <I9Cell span={4} label="Employee Info from Section 1"><span className="i9-locked-box" /></I9Cell>
+                <I9Cell span={4} label="List A: Identity and Employment Authorization"><span className="i9-locked-box" /></I9Cell>
+                <I9Cell span={4} label="List B / List C"><span className="i9-locked-box" /></I9Cell>
+                <I9Cell span={8} label="Signature of Employer or Authorized Representative"><span className="i9-locked-box" /></I9Cell>
+                <I9Cell span={4} label="Today’s Date (mm/dd/yyyy)"><span className="i9-locked-box" /></I9Cell>
+              </div>
+              <div className="i9-doc-footer"><span>Form I-9 05/31/2027</span><span>{`Page 2 of ${I9_DOC_PAGE_COUNT}`}</span></div>
+            </>}
+          </div>
+        </main>
+      </div>,
+      document.body,
+    )}
+    {signOpen && <Modal open size="small" title="Adopt your signature" onClose={() => setSignOpen(false)}
+      footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => setSignOpen(false)}>Cancel</Button><Button kind="primary" onClick={adoptSignature}>Adopt and sign</Button></Inline>}>
+      <Stack gap="medium">
+        <Input label="Full name" required autoComplete="off" value={signName} error={signError || undefined} onChange={event => { setSignName(event.target.value); setSignError(''); }} />
+        <div className="i9-signature-preview" aria-label="Signature preview">{signName || 'Your signature'}</div>
+        <Text size="xs" color="secondary">By selecting Adopt and sign, I agree that this is the electronic representation of my signature.</Text>
+      </Stack>
+    </Modal>}
+    {confirmLeave && <Modal open size="small" title="Leave this document?" onClose={() => setConfirmLeave(false)}
+      footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => setConfirmLeave(false)}>Keep going</Button><Button kind="primary" onClick={onClose}>Leave</Button></Inline>}>
+      <Text size="md">Your entries on this document won’t be saved.</Text>
+    </Modal>}
+    {completed && <Modal open size="medium" aria-label="You’re halfway there" closeOnBackdropClick={false} onClose={() => onComplete(completed, 'later')}
+      footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => onComplete(completed, 'later')}>Finish Later</Button><Button kind="primary" onClick={() => onComplete(completed, 'verify')}>Verify</Button></Inline>}>
+      <Stack gap="large" align="center">
+        <div className="i9-success-badge"><Icon name="check" size="medium" /></div>
+        <Stack gap="small" align="center">
+          <h2 className="i9-success-title">You’re halfway there</h2>
+          <p className="i9-success-copy">Your I-9 form has been signed. Next we need to verify your identity.<br />If you decide to <strong>Finish Later</strong>, you can continue from an email link.</p>
+        </Stack>
+        <div className="i9-upnext">
+          <Stack gap="small">
+            <Text size="xs" color="secondary">UP NEXT</Text>
+            <Text size="md" weight="semibold">Document Verification</Text>
+            <Text size="sm" color="secondary">Complete your I-9 verification with OneNotary. You’ll present your identity documents to an authorized verifier on a video call. If you decide to finish the process later, we’ll send an email to remind you.</Text>
+            <div><Link href="#i9-docs" size="small" onClick={event => { event.preventDefault(); setShowDocs(open => !open); }}>{showDocs ? 'Hide eligible documents' : 'View all eligible documents'}</Link></div>
+            {showDocs && <ul className="i9-doc-list">{(['a', 'b', 'c'] as const).map(key => <li key={key}><Text size="sm"><strong>{I9_DOCUMENT_LISTS[key].label}:</strong> {I9_DOCUMENT_LISTS[key].titles.join(', ')}</Text></li>)}</ul>}
+            <Inline gap="small" align="center"><Icon name="clock" size="small" /><Text size="xs" color="secondary">10-15 min</Text></Inline>
+          </Stack>
+        </div>
+      </Stack>
+    </Modal>}
+  </>;
+}
+
+type OneNotaryStage = 'eligibility' | 'av' | 'upload' | 'finding' | 'assigned' | 'session';
+const ONENOTARY_SESSION_DOCUMENTS = ['Form I-9 (Employment Eligibility Verification)', 'U.S. Driver’s License', 'U.S. Social Security Card'];
+const ONENOTARY_TASKS = [
+  { icon: 'id-card', title: 'Prepare Your IDs for Verification', copy: 'Ensure you have an original copy of the same documents you uploaded' },
+  { icon: 'user', title: 'Present Your IDs to the Authorized Representative', copy: 'When prompted, hold your IDs close to the camera for visual inspection. Keep them steady.' },
+  { icon: 'edit', title: 'Verification and Signing', copy: 'The Authorized Representative will examine your documents and complete Form I-9. This process will be recorded on video.' },
+  { icon: 'download', title: 'Employment Eligibility Verification is Complete', copy: 'The verified documents will be available for download.' },
+] as const;
+
+function QrPattern() {
+  const size = 21;
+  const finder = (x: number, y: number) => {
+    const inFinder = (ox: number, oy: number) => x >= ox && x < ox + 7 && y >= oy && y < oy + 7;
+    for (const [ox, oy] of [[0, 0], [size - 7, 0], [0, size - 7]]) {
+      if (inFinder(ox, oy)) {
+        const dx = x - ox, dy = y - oy;
+        return dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4);
+      }
+      if (x >= ox - 1 && x <= ox + 7 && y >= oy - 1 && y <= oy + 7) return false;
+    }
+    return null;
+  };
+  const cells = Array.from({ length: size * size }, (_, index) => {
+    const x = index % size, y = Math.floor(index / size);
+    const fixed = finder(x, y);
+    return fixed ?? ((x * 7 + y * 13 + x * y * 3) % 5 < 2);
+  });
+  return <div className="on-qr" role="img" aria-label="Sample QR code for uploading documents from a phone" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+    {cells.map((on, index) => <span key={index} className={on ? 'is-on' : undefined} />)}
+  </div>;
+}
+
+function OneNotaryStatusRow({ state, children }: { state: 'done' | 'current' | 'pending'; children: React.ReactNode }) {
+  return <li className={`on-status-row is-${state}`}>
+    <span className="on-status-mark" aria-hidden="true">{state === 'done' && <Icon name="check" size="small" />}</span>
+    <span>{children}</span>
+  </li>;
+}
+
+function I9OneNotary({ session, onExit }: { session: I9Session; onExit: () => void }) {
+  const [stage, setStage] = useState<OneNotaryStage>('eligibility');
+  const [agreed, setAgreed] = useState({ docusign: true, onenotary: true });
+  const [waitNotice, setWaitNotice] = useState(false);
+  const titleId = useId();
+  const signerName = session.recipientName || 'Melony Woods';
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+  useEffect(() => {
+    if (stage === 'finding' && !waitNotice) {
+      const id = window.setTimeout(() => setStage('assigned'), 3500);
+      return () => window.clearTimeout(id);
+    }
+    if (stage === 'assigned') {
+      const id = window.setTimeout(() => setStage('session'), 4000);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, [stage, waitNotice]);
+
+  const getReady = stage === 'eligibility' || stage === 'av' || stage === 'upload';
+  const documentLinks = <Stack gap="small">
+    <h2 className="on-section-title">Session Documents</h2>
+    <ul className="on-doc-links">{ONENOTARY_SESSION_DOCUMENTS.map(name => <li key={name}><Link href="#session-documents" size="small" onClick={event => event.preventDefault()}>{name}</Link></li>)}</ul>
+  </Stack>;
+
+  const sessionView = <div className="journey-shell on-shell on-session" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <header className="on-session-bar">
+      <Inline gap="medium" align="center">
+        <img className="on-docusign-logo" src="/docusign-logo.svg" alt="Docusign" />
+        <span className="on-session-title" id={titleId}>Employment Eligibility Verification // Recording (2 people)</span>
+      </Inline>
+      <Button kind="secondary" size="small" onClick={onExit}>Exit Session</Button>
+    </header>
+    <div className="on-session-body">
+      <main className="on-task-list">
+        <h1 className="sr-only">Verification session in progress</h1>
+        <ol>{ONENOTARY_TASKS.map((task, index) => <li key={task.title} className="on-task">
+          <span className={`on-task-tile is-tone-${index}`}><span className="on-task-number">{String(index + 1).padStart(2, '0')}</span><Icon name={task.icon} size={32} /></span>
+          <div><h2 className="on-task-title">{task.title}</h2><p className="on-task-copy">{task.copy}</p></div>
+        </li>)}</ol>
+      </main>
+      <aside className="on-video-panel" aria-label="Participants">
+        <figure className="on-video is-verifier">
+          <figcaption><span><strong>Verifier</strong> Allison O.</span><Inline gap="xs"><Icon name="video-camera" size="small" /><Icon name="microphone" size="small" /></Inline></figcaption>
+          <img src="/onenotary-verifier.png" alt="Verifier Allison O. on video, wearing headphones" />
+        </figure>
+        <figure className="on-video is-signer">
+          <figcaption><span><strong>Signer</strong> {signerName}</span><Inline gap="xs"><Icon name="video-camera" size="small" /><Icon name="microphone" size="small" /></Inline></figcaption>
+          <img src="/onenotary-signer.png" alt={`Signer ${signerName} on video`} />
+        </figure>
+      </aside>
+    </div>
+  </div>;
+
+  const requestShell = <div className="journey-shell on-shell" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <header className="on-header"><span className="on-wordmark">OneNotary</span></header>
+    <div className="on-test-strip" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <span key={index}>TEST NOTARIZATION</span>)}</div>
+    <main className="on-main">
+      <h1 className="on-title" id={titleId}>Verification Request 123ABC</h1>
+      <div className="on-card">
+        <ol className="on-steps" aria-label="Verification progress">
+          <li className={getReady ? 'is-active' : 'is-complete'} aria-current={getReady ? 'step' : undefined}>
+            <span className="on-step-icon"><Icon name="id-card" size={32} />{!getReady && <span className="on-step-badge is-done"><Icon name="check" size="small" /></span>}</span>
+            <span>1. Get Ready</span>
+          </li>
+          <li className={getReady ? undefined : 'is-active'} aria-current={getReady ? undefined : 'step'}>
+            <span className="on-step-icon"><Icon name="video-camera" size={32} /></span>
+            <span>2. Meet Representative</span>
+          </li>
+        </ol>
+        <div className="on-card-body">
+          {getReady && <Stack gap="large">
+            <h2 className="on-section-title is-large">Upload your employment authorization documents</h2>
+            <div className="on-upload-panel">
+              <div className="on-upload-visual"><QrPattern /><span className="on-phone" aria-hidden="true"><Icon name="camera" size={32} /></span></div>
+              <p>Scan this QR code with your smartphone, and follow the instructions to capture your ID.</p>
+              <p>Once your documents captured, please return to this screen.</p>
+            </div>
+            <div><Button kind="secondary" onClick={() => { setWaitNotice(true); setStage('finding'); }}>Upload file</Button></div>
+          </Stack>}
+          {!getReady && <Stack gap="large">
+            <section className={`on-status-card${stage === 'assigned' ? ' is-assigned' : ''}`} aria-live="polite">
+              <div className="on-status-banner">
+                {stage === 'finding' ? <div>
+                  <h2 className="on-banner-title">Finding an I-9 verifier…</h2>
+                  <p className="on-banner-lead">Wait time is about 1 minute</p>
+                  <p className="on-banner-note">Please keep this screen open and your volume turned up.</p>
+                </div> : <div>
+                  <div className="on-verifier-id"><img src="/onenotary-verifier.png" alt="" /><h2 className="on-banner-title">Your verifier<br />Allison O.</h2></div>
+                  <p className="on-banner-lead">is getting ready to start</p>
+                  <p className="on-banner-note">Please keep this screen open and your volume turned up.</p>
+                </div>}
+                {stage === 'finding' ? <img className="on-banner-art" src="/onenotary-map.png" alt="" /> : <span className="on-banner-art is-icon" aria-hidden="true"><Icon name="video-camera" size={32} /></span>}
+              </div>
+              <ul className="on-status-list">
+                <OneNotaryStatusRow state="done">{signerName} – Ready to Start</OneNotaryStatusRow>
+                {stage === 'finding'
+                  ? <><OneNotaryStatusRow state="current"><strong>Finding a verifier.</strong> Typical waiting time is ~1 minute</OneNotaryStatusRow><OneNotaryStatusRow state="pending">Verifier starts the video call</OneNotaryStatusRow></>
+                  : <><OneNotaryStatusRow state="done">Verifier Allison O. is assigned to your request</OneNotaryStatusRow><OneNotaryStatusRow state="current"><strong>Verifier is about to start</strong> the video call.</OneNotaryStatusRow></>}
+              </ul>
+            </section>
+            {stage === 'assigned' && <div><Button kind="primary" onClick={() => setStage('session')}>Start verification</Button></div>}
+            {documentLinks}
+          </Stack>}
+        </div>
+      </div>
+    </main>
+    <footer className="on-footer">
+      <Inline gap="small" align="center"><img className="on-docusign-logo" src="/docusign-logo.svg" alt="Docusign" /><span className="on-footer-partner">OneNotary</span></Inline>
+      <Inline gap="large" align="center"><span>Terms of Service</span><span>Copyright © 2025 OneNotary Inc.</span></Inline>
+    </footer>
+  </div>;
+
+  return <>
+    {createPortal(stage === 'session' ? sessionView : requestShell, document.body)}
+    {stage === 'eligibility' && <Modal open size="medium" aria-label="Form I-9 Verification is requested" closeOnBackdropClick={false} closeOnEscape={false}
+      footer={<Button kind="primary" fullWidth disabled={!agreed.docusign || !agreed.onenotary} onClick={() => setStage('av')}>Continue</Button>}>
+      <Stack gap="large" align="center">
+        <h2 className="on-modal-title">Form I-9 Verification is requested</h2>
+        <Text size="md">Here is how it works</Text>
+        <ol className="on-how">{[{ icon: 'id-card', label: 'Confirm your identity' }, { icon: 'video-camera', label: 'Meet the representative' }, { icon: 'camera', label: 'Show your ID on video' }].map((item, index) => <li key={item.label}>
+          <span className="on-how-circle"><span className="on-how-number">{index + 1}</span><Icon name={item.icon} size={32} /></span>
+          <Text size="md">{item.label}</Text>
+        </li>)}</ol>
+        <Stack gap="medium">
+          <div className="on-consent">
+            <Checkbox checked={agreed.docusign} showLabel={false} label="I agree to the Docusign Terms of Service and Privacy Policy" onChange={event => setAgreed(current => ({ ...current, docusign: event.target.checked }))} />
+            <span>I agree to the Docusign <Link href="#terms" size="small" onClick={event => event.preventDefault()}>Terms of Service</Link> and <Link href="#privacy" size="small" onClick={event => event.preventDefault()}>Privacy Policy</Link> and allow Docusign to collect my personal information provided in the online Form I-9 Verification.</span>
+          </div>
+          <div className="on-consent">
+            <Checkbox checked={agreed.onenotary} showLabel={false} label="I agree to the OneNotary Terms of Service" onChange={event => setAgreed(current => ({ ...current, onenotary: event.target.checked }))} />
+            <span>I agree to the <Link href="#onenotary-terms" size="small" onClick={event => event.preventDefault()}>OneNotary Terms of Service</Link> and I understand that online Form I-9 Verification is legally binding.</span>
+          </div>
+        </Stack>
+      </Stack>
+    </Modal>}
+    {stage === 'av' && <Modal open size="small" aria-label="Audio/Video Check" closeOnBackdropClick={false} closeOnEscape={false}
+      footer={<Button kind="primary" fullWidth onClick={() => setStage('upload')}>Save and Continue</Button>}>
+      <Stack gap="large">
+        <h2 className="on-modal-title">Audio/Video Check</h2>
+        <figure className="on-preview"><img src="/onenotary-signer.png" alt="Camera preview of the signer" /><figcaption>All good!</figcaption></figure>
+        <div className="on-checks">
+          <ul>{[{ icon: 'signal', label: 'Connection' }, { icon: 'video-camera', label: 'Camera' }, { icon: 'microphone', label: 'Microphone' }, { icon: 'volume-high', label: 'Speakers' }].map(item => <li key={item.label}>
+            <span className="on-check-icon"><Icon name={item.icon} size="medium" /><span className="on-check-badge" aria-hidden="true"><Icon name="check" size="small" /></span></span>
+            <span className="sr-only">{`${item.label} is working`}</span>
+          </li>)}</ul>
+          <Button kind="secondary" size="small">Settings</Button>
+        </div>
+      </Stack>
+    </Modal>}
+    {stage === 'finding' && waitNotice && <Modal open size="small" aria-label="All set! Wait for a notary" closeOnBackdropClick={false} closeOnEscape={false}
+      footer={<Button kind="primary" fullWidth onClick={() => setWaitNotice(false)}>Got It</Button>}>
+      <Stack gap="medium" align="center">
+        <h2 className="on-modal-title is-small">All Set! Wait for a Notary</h2>
+        <span className="on-wait-art" aria-hidden="true"><Icon name="volume-high" size={32} /></span>
+        <p className="on-wait-strong">Please keep this screen open and your volume turned up.</p>
+        <p className="on-wait-copy">We’ll notify you with a sound when the notary starts the session.</p>
+        <p className="on-wait-copy">We’re working hard to let people in as quickly as possible, so thank you for your patience.</p>
+      </Stack>
+    </Modal>}
+  </>;
+}
+
+function I9DocumentFields({ listKey, value, errors, onChange }: {
+  listKey: 'a' | 'b' | 'c'; value: I9Document; errors: Record<string, string>; onChange: (change: Partial<I9Document>) => void;
+}) {
+  const list = I9_DOCUMENT_LISTS[listKey];
+  return <Card radius="small"><Card.Header><Text size="md" weight="semibold">{list.label} document</Text></Card.Header><Card.Body><Stack gap="medium">
+    <Select label="Document title" required value={value.title} error={errors[`${listKey}.title`]} onChange={event => onChange({ title: event.target.value })}>
+      <option value="">Select a document</option>{list.titles.map(title => <option key={title} value={title}>{title}</option>)}
+    </Select>
+    <Grid columns={2} gap="medium">
+      <Input label="Issuing authority" required value={value.authority} error={errors[`${listKey}.authority`]} onChange={event => onChange({ authority: event.target.value })} />
+      <Input label="Document number" required value={value.number} error={errors[`${listKey}.number`]} onChange={event => onChange({ number: event.target.value })} />
+    </Grid>
+    {listKey !== 'c' && <Input label="Expiration date" type="date" value={value.expires} description="Optional. Leave blank if the document does not expire." onChange={event => onChange({ expires: event.target.value })} />}
+  </Stack></Card.Body></Card>;
+}
+
+function I9Section2Journey({ session, setSession, onExit, onFinish }: {
   session: I9Session; setSession: React.Dispatch<React.SetStateAction<I9Session | null>>; onExit: () => void; onFinish: (completed: boolean) => void;
 }) {
+  const data = session.section2 ?? EMPTY_SECTION2;
+  const { step, route, docs } = data;
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [confirmExit, setConfirmExit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
-  const attempts = useRef(0);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  const expired = demoFlag('i9') === 'expired';
-  const { step, personal, authorization } = session;
-  const legalName = `${personal.firstName} ${personal.lastName}`.trim();
-  const completed = step === I9_STEPS.length - 1;
+  const completed = step === I9_SECTION2_STEPS.length - 1;
+  const { personal, authorization } = session;
+  const employeeName = `${personal.firstName} ${personal.lastName}`.trim();
+  const deadline = formatLongDate(addBusinessDays(session.startDate, 3));
+  const authorizationLabel = I9_AUTHORIZATION_OPTIONS.find(option => option.value === authorization.status)?.label ?? '';
 
-  const patch = (change: Partial<I9Session>) => setSession(current => current ? { ...current, ...change } : current);
-  const patchPersonal = (key: keyof I9Session['personal']) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    patch({ personal: { ...personal, [key]: event.target.value } });
-    setErrors(current => ({ ...current, [key]: '' }));
+  const patch = (change: Partial<I9Section2Data>) => setSession(current => current ? { ...current, section2: { ...(current.section2 ?? EMPTY_SECTION2), ...change } } : current);
+  const patchDoc = (key: 'a' | 'b' | 'c') => (change: Partial<I9Document>) => {
+    patch({ docs: { ...docs, [key]: { ...docs[key], ...change } } });
+    setErrors({});
   };
-  const go = (next: number) => { setErrors({}); setSubmitError(false); patch({ step: next }); };
+  const go = (next: number) => { setErrors({}); patch({ step: next }); };
 
-  const validatePersonal = () => {
+  const validateDocuments = () => {
     const next: Record<string, string> = {};
-    if (!personal.firstName.trim()) next.firstName = 'Enter your first name.';
-    if (!personal.lastName.trim()) next.lastName = 'Enter your last name.';
-    if (!personal.dob) next.dob = 'Enter your date of birth.';
-    else if (new Date(`${personal.dob}T00:00:00`) >= new Date()) next.dob = 'Date of birth must be in the past.';
-    if (!personal.address.trim()) next.address = 'Enter your street address.';
-    if (!personal.city.trim()) next.city = 'Enter your city.';
-    if (!personal.state) next.state = 'Choose a state.';
-    if (!/^\d{5}$/.test(personal.zip)) next.zip = 'Enter a 5-digit ZIP code.';
-    if (!EMAIL_PATTERN.test(personal.email)) next.email = 'Enter a valid email address.';
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
-  const validateAuthorization = () => {
-    const next: Record<string, string> = {};
-    if (!authorization.status) next.status = 'Choose the option that describes you.';
-    if ((authorization.status === 'permanent' || authorization.status === 'authorized') && !/^A?-?\d{7,9}$/i.test(authorization.aNumber.trim())) next.aNumber = 'Enter your A-Number, like A123456789.';
-    if (authorization.status === 'authorized') {
-      if (!authorization.expires) next.expires = 'Enter the date your work authorization expires.';
-      else if (new Date(`${authorization.expires}T00:00:00`) <= new Date()) next.expires = 'The expiration date must be in the future.';
-    }
+    if (!route) next.route = 'Choose which documents the employee presented.';
+    (route === 'a' ? ['a'] : route === 'bc' ? ['b', 'c'] : [] as string[]).forEach(key => {
+      const doc = docs[key as 'a' | 'b' | 'c'];
+      if (!doc.title) next[`${key}.title`] = 'Choose the document title.';
+      if (!doc.authority.trim()) next[`${key}.authority`] = 'Enter the issuing authority.';
+      if (!doc.number.trim()) next[`${key}.number`] = 'Enter the document number.';
+    });
     setErrors(next);
     return Object.keys(next).length === 0;
   };
   const next = () => {
-    if (step === 1 && !validatePersonal()) return;
-    if (step === 2 && !validateAuthorization()) return;
-    if (step === 3 && !session.attested) { setErrors({ attested: 'Confirm the statement to continue.' }); return; }
+    if (step === 1 && !validateDocuments()) return;
     go(step + 1);
   };
-  const sign = () => {
+  const submit = () => {
     if (submitting) return;
-    if (session.signature.trim().toLowerCase() !== legalName.toLowerCase()) { setErrors({ signature: `Type your name exactly as shown: ${legalName}` }); return; }
-    setErrors({}); setSubmitError(false); setSubmitting(true);
+    const problems: Record<string, string> = {};
+    if (!data.repTitle.trim()) problems.repTitle = 'Enter your job title.';
+    if (data.signature.trim().toLowerCase() !== session.employerName.toLowerCase()) problems.signature = `Type your name exactly as shown: ${session.employerName}`;
+    if (!data.attested) problems.attested = 'Confirm the statement to submit.';
+    setErrors(problems);
+    if (Object.keys(problems).length) return;
+    setSubmitting(true);
     timer.current = window.setTimeout(() => {
-      attempts.current += 1;
       setSubmitting(false);
-      if (demoFlag('i9') === 'error' && attempts.current === 1) { setSubmitError(true); return; }
-      setSession(current => current ? { ...current, step: 5, submittedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }) } : current);
+      patch({ step: 3, completedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }) });
     }, 1000);
   };
-  const requestExit = () => (expired || completed) ? onFinish(completed) : setConfirmExit(true);
 
-  const footer = expired ? <Button kind="primary" onClick={() => onFinish(false)}>Close</Button>
-    : completed ? <Button kind="primary" onClick={() => onFinish(true)}>Done</Button>
+  const footer = completed ? <Button kind="primary" onClick={() => onFinish(true)}>Done</Button>
     : <>{step > 0 ? <Button kind="secondary" onClick={() => go(step - 1)} disabled={submitting}>Back</Button> : <span />}
-      {step === 4 ? <Button kind="primary" loading={submitting} onClick={sign}>Sign and submit</Button> : <Button kind="primary" onClick={next}>{step === 0 ? 'Get started' : step === 3 ? 'Continue to sign' : 'Continue'}</Button>}</>;
-
+      {step === 2 ? <Button kind="primary" loading={submitting} onClick={submit}>Complete Section 2</Button> : <Button kind="primary" onClick={next}>{step === 0 ? 'Continue to documents' : 'Continue to sign'}</Button>}</>;
   const summary = (rows: [string, string][]) => <Grid columns={2} gap="medium">{rows.map(([label, value]) => <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value || 'Not provided'}</Text></Stack>)}</Grid>;
-  const authorizationLabel = I9_AUTHORIZATION_OPTIONS.find(option => option.value === authorization.status)?.label ?? '';
+  const docRows = (key: 'a' | 'b' | 'c'): [string, string][] => [[`${I9_DOCUMENT_LISTS[key].label} document`, docs[key].title], ['Issuing authority', docs[key].authority], ['Number', docs[key].number], ...(docs[key].expires ? [['Expires', formatLongDate(docs[key].expires)] as [string, string]] : [])];
 
-  return <>
-    <JourneyShell title="Form I-9, Section 1" subtitle={`Employment Eligibility Verification · from ${session.employerName}`} steps={I9_STEPS} activeIndex={step} onExit={requestExit} footer={footer} hideProgress={expired}>
-      {expired ? <Stack gap="large">
-        <JourneyHeading title="This link has expired" description={`For security, this link expired ${session.expiresInDays} days after it was sent. Your answers weren’t submitted.`} />
-        <Alert kind="warning" title="Ask for a new link">Contact {session.employerName} at {session.employerEmail} and ask them to send Form I-9 again.</Alert>
-      </Stack> : step === 0 ? <Stack gap="large">
-        <JourneyHeading title={`Welcome${session.recipientName ? `, ${session.recipientName.split(' ')[0]}` : ''}`} description="Federal law requires every new employee to confirm they can work in the United States. This takes about 10 minutes." />
-        {session.message && <Alert kind="information" title={`A note from ${session.employerName}`}>{session.message}</Alert>}
-        <Card radius="small"><Card.Header><Text size="md" weight="semibold">Have these ready</Text></Card.Header><Card.Body><Stack gap="small">
-          <Text size="sm">Your legal name and date of birth</Text><Text size="sm">Your current home address</Text><Text size="sm">Your A-Number, if you are not a U.S. citizen</Text>
-        </Stack></Card.Body></Card>
-        <Text size="sm" color="secondary">You don’t need to upload documents here. {session.employerName} will review your documents in person within 3 business days of {formatLongDate(session.startDate)}.</Text>
-      </Stack> : step === 1 ? <Stack gap="large">
-        <JourneyHeading title="Personal information" description="Enter your details exactly as they appear on your identity documents." />
-        <Grid columns={2} gap="medium">
-          <Input label="First name" required autoComplete="given-name" value={personal.firstName} error={errors.firstName} onChange={patchPersonal('firstName')} />
-          <Input label="Last name" required autoComplete="family-name" value={personal.lastName} error={errors.lastName} onChange={patchPersonal('lastName')} />
-        </Grid>
-        <Input label="Other last names used" value={personal.otherNames} onChange={patchPersonal('otherNames')} description="Optional. Include maiden names." />
-        <Input label="Date of birth" required type="date" autoComplete="bday" value={personal.dob} error={errors.dob} onChange={patchPersonal('dob')} />
-        <Input label="Street address" required autoComplete="street-address" value={personal.address} error={errors.address} onChange={patchPersonal('address')} />
-        <Grid columns={3} gap="medium">
-          <Input label="City" required autoComplete="address-level2" value={personal.city} error={errors.city} onChange={patchPersonal('city')} />
-          <Select label="State" required value={personal.state} error={errors.state} onChange={patchPersonal('state')}><option value="">Select</option>{US_STATES.map(code => <option key={code} value={code}>{code}</option>)}</Select>
-          <Input label="ZIP code" required inputMode="numeric" autoComplete="postal-code" value={personal.zip} error={errors.zip} onChange={patchPersonal('zip')} />
-        </Grid>
-        <Grid columns={2} gap="medium">
-          <Input label="Email address" required type="email" autoComplete="email" value={personal.email} error={errors.email} onChange={patchPersonal('email')} />
-          <Input label="Phone number" type="tel" autoComplete="tel" value={personal.phone} onChange={patchPersonal('phone')} description="Optional." />
-        </Grid>
-      </Stack> : step === 2 ? <Stack gap="large">
-        <JourneyHeading title="Work authorization" description="I attest, under penalty of perjury, that I am:" />
-        <fieldset className="journey-fieldset" aria-describedby={errors.status ? 'i9-status-error' : undefined}>
-          <legend className="sr-only">Citizenship and work authorization status</legend>
-          <Stack gap="medium">
-            {I9_AUTHORIZATION_OPTIONS.map(option => <Radio key={option.value} name="i9-status" label={option.label} description={option.description} checked={authorization.status === option.value}
-              onChange={() => { patch({ authorization: { ...authorization, status: option.value } }); setErrors({}); }} />)}
-            {errors.status && <Text size="sm" color="error"><span id="i9-status-error">{errors.status}</span></Text>}
-          </Stack>
-        </fieldset>
-        {(authorization.status === 'permanent' || authorization.status === 'authorized') && <Input label="A-Number" required value={authorization.aNumber} error={errors.aNumber} placeholder="A123456789" onChange={event => { patch({ authorization: { ...authorization, aNumber: event.target.value } }); setErrors(current => ({ ...current, aNumber: '' })); }} />}
-        {authorization.status === 'authorized' && <Input label="Work authorization expires" required type="date" value={authorization.expires} error={errors.expires} onChange={event => { patch({ authorization: { ...authorization, expires: event.target.value } }); setErrors(current => ({ ...current, expires: '' })); }} />}
-      </Stack> : step === 3 ? <Stack gap="large">
-        <JourneyHeading title="Review your answers" description="Make sure everything is correct before you sign." />
-        <Card radius="small"><Card.Header><Inline justify="between" align="center"><Text size="md" weight="semibold">Personal information</Text><Button kind="tertiary" size="small" onClick={() => go(1)}>Edit</Button></Inline></Card.Header><Card.Body>
-          {summary([['Name', legalName], ['Date of birth', formatLongDate(personal.dob)], ['Address', `${personal.address}, ${personal.city}, ${personal.state} ${personal.zip}`], ['Email', personal.email], ['Phone', personal.phone], ['Other last names', personal.otherNames]])}
-        </Card.Body></Card>
-        <Card radius="small"><Card.Header><Inline justify="between" align="center"><Text size="md" weight="semibold">Work authorization</Text><Button kind="tertiary" size="small" onClick={() => go(2)}>Edit</Button></Inline></Card.Header><Card.Body>
-          {summary([['Status', authorizationLabel], ...(authorization.aNumber ? [['A-Number', authorization.aNumber] as [string, string]] : []), ...(authorization.expires ? [['Expires', formatLongDate(authorization.expires)] as [string, string]] : [])])}
-        </Card.Body></Card>
-        <Checkbox label="I attest, under penalty of perjury, that the information I provided is true and correct." checked={session.attested} error={!!errors.attested} errorMessage={errors.attested} showErrorMessage
-          onChange={event => { patch({ attested: event.target.checked }); setErrors({}); }} />
-      </Stack> : step === 4 ? <Stack gap="large">
-        <JourneyHeading title="Sign Section 1" description="Type your full legal name to sign this form electronically." />
-        {submitError && <Alert kind="danger" title="We couldn’t submit your form" action={{ label: 'Try again', onClick: sign }}>Something went wrong on our side. Your answers are saved.</Alert>}
-        <Input label="Type your full legal name" required autoComplete="off" value={session.signature} error={errors.signature} description={`Must match: ${legalName}`} onChange={event => { patch({ signature: event.target.value }); setErrors({}); }} />
-        <Input label="Date signed" value={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} readOnly />
-      </Stack> : <Stack gap="large">
-        <JourneyHeading title="Section 1 is complete" description={`Thank you, ${personal.firstName}. Your form was submitted on ${session.submittedAt}.`} />
-        <Alert kind="success" title="What happens next">{session.employerName} will review your identity documents in person within 3 business days of {formatLongDate(session.startDate)} and complete Section 2.</Alert>
-        <Card radius="small"><Card.Header><Text size="md" weight="semibold">Bring these documents on your first day</Text></Card.Header><Card.Body><Stack gap="small">
-          <Text size="sm">One document from List A, such as a U.S. passport, or</Text><Text size="sm">One document from List B and one from List C, such as a driver’s license and a Social Security card</Text>
-        </Stack></Card.Body></Card>
-      </Stack>}
-    </JourneyShell>
-    {confirmExit && <Modal open size="small" title="Exit this form?" onClose={() => setConfirmExit(false)}
-      footer={<Inline justify="end" gap="small"><Button kind="tertiary" onClick={() => onFinish(false)}>Discard answers</Button><Button kind="secondary" onClick={() => setConfirmExit(false)}>Keep going</Button><Button kind="primary" onClick={() => { setConfirmExit(false); onExit(); }}>Save and exit</Button></Inline>}>
-      <Text size="md">Your answers are saved. You can resume from Templates.</Text>
-    </Modal>}
-  </>;
+  return <JourneyShell title="Form I-9, Section 2" subtitle={`Employer review · ${employeeName || session.recipientName}`} steps={I9_SECTION2_STEPS} activeIndex={step} onExit={() => completed ? onFinish(true) : onExit()} footer={footer}>
+    {step === 0 ? <Stack gap="large">
+      <JourneyHeading title="Review Section 1" description={`${employeeName || session.recipientName} submitted Section 1 on ${session.submittedAt}.`} />
+      <Alert kind="warning" title={`Complete Section 2 by ${deadline}`}>Federal rules require you to examine original documents within 3 business days of the employee’s first day, {formatLongDate(session.startDate)}.</Alert>
+      <Card radius="small"><Card.Header><Text size="md" weight="semibold">Employee information</Text></Card.Header><Card.Body>
+        {summary([['Name', employeeName], ['Date of birth', formatLongDate(personal.dob)], ['Address', `${personal.address}, ${personal.city}, ${personal.state} ${personal.zip}`], ['Email', personal.email], ['Phone', personal.phone], ['Other last names', personal.otherNames]])}
+      </Card.Body></Card>
+      <Card radius="small"><Card.Header><Text size="md" weight="semibold">Work authorization attested by employee</Text></Card.Header><Card.Body>
+        {summary([['Status', authorizationLabel], ...(authorization.aNumber ? [['A-Number', authorization.aNumber] as [string, string]] : []), ...(authorization.expires ? [['Expires', formatLongDate(authorization.expires)] as [string, string]] : [])])}
+      </Card.Body></Card>
+    </Stack> : step === 1 ? <Stack gap="large">
+      <JourneyHeading title="Verify documents" description="Examine the original documents in person, then record what the employee presented." />
+      <fieldset className="journey-fieldset" aria-describedby={errors.route ? 'i9-route-error' : undefined}>
+        <legend className="sr-only">Documents presented</legend>
+        <Stack gap="medium">
+          <Radio name="i9-route" label="One List A document" description="Proves both identity and work authorization, such as a U.S. passport." checked={route === 'a'} onChange={() => { patch({ route: 'a' }); setErrors({}); }} />
+          <Radio name="i9-route" label="One List B and one List C document" description="List B proves identity and List C proves work authorization." checked={route === 'bc'} onChange={() => { patch({ route: 'bc' }); setErrors({}); }} />
+          {errors.route && <Text size="sm" color="error"><span id="i9-route-error">{errors.route}</span></Text>}
+        </Stack>
+      </fieldset>
+      {route === 'a' && <I9DocumentFields listKey="a" value={docs.a} errors={errors} onChange={patchDoc('a')} />}
+      {route === 'bc' && <><I9DocumentFields listKey="b" value={docs.b} errors={errors} onChange={patchDoc('b')} /><I9DocumentFields listKey="c" value={docs.c} errors={errors} onChange={patchDoc('c')} /></>}
+    </Stack> : step === 2 ? <Stack gap="large">
+      <JourneyHeading title="Sign Section 2" description="Confirm what you examined and sign electronically." />
+      <Card radius="small"><Card.Header><Text size="md" weight="semibold">Documents examined</Text></Card.Header><Card.Body><Stack gap="medium">
+        {(route === 'a' ? ['a'] : ['b', 'c']).map(key => <div key={key}>{summary(docRows(key as 'a' | 'b' | 'c'))}</div>)}
+        <Inline><Button kind="tertiary" size="small" onClick={() => go(1)}>Edit documents</Button></Inline>
+      </Stack></Card.Body></Card>
+      <Input label="Your job title" required autoComplete="organization-title" value={data.repTitle} error={errors.repTitle} onChange={event => { patch({ repTitle: event.target.value }); setErrors({}); }} />
+      <Checkbox label="I attest, under penalty of perjury, that I examined the documents above, they appear genuine and relate to the employee, and the employee began work on the date shown." checked={data.attested} error={!!errors.attested} errorMessage={errors.attested} showErrorMessage
+        onChange={event => { patch({ attested: event.target.checked }); setErrors({}); }} />
+      <Input label="Type your full name" required autoComplete="off" value={data.signature} error={errors.signature} description={`Must match: ${session.employerName}`} onChange={event => { patch({ signature: event.target.value }); setErrors({}); }} />
+      <Input label="Date signed" value={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} readOnly />
+    </Stack> : <Stack gap="large">
+      <JourneyHeading title="Form I-9 is complete" description={`Section 2 for ${employeeName} was signed on ${data.completedAt}.`} />
+      <Alert kind="success" title="What happens next">The completed form is stored with {employeeName}’s record. Keep it for 3 years after the hire date or 1 year after employment ends, whichever is later.</Alert>
+    </Stack>}
+  </JourneyShell>;
 }
 
 function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate }: {
@@ -2388,8 +2953,9 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(25);
   const [i9Template, setI9Template] = useState<TemplateItem | null>(null);
-  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'journey'>('closed');
+  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'email' | 'signing' | 'onenotary' | 'section2'>('closed');
   const [i9Session, setI9Session] = useState<I9Session | null>(null);
+  const [i9Pending, setI9Pending] = useState<I9Session | null>(null);
   const kind = templateKindForView(view);
   const isEnvelope = ['my-templates', 'shared-with-me', 'favorites', 'all-templates'].includes(view);
   useEffect(() => { setPage(1); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); setNotice(''); }, [view]);
@@ -2457,10 +3023,10 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     paddingVariant={isEnvelope ? 'compact' : 'default'}
     pageHeader={<PageHeader title={TEMPLATE_VIEW_LABELS[view]} actions={isEnvelope ? undefined : <Button kind="primary" startElement={<Icon name="plus" size="small" />} onClick={() => onEditorChange({ kind })}>Create {TEMPLATE_KINDS[kind].label.toLowerCase()}</Button>} />}
     banner={notice ? <Banner kind="success" closable onClose={() => setNotice('')}>{notice}</Banner>
-      : i9Session && i9Phase === 'closed' ? <Banner kind="information">
+      : i9Pending && i9Phase === 'closed' ? <Banner kind="information">
         <Inline gap="medium" align="center" wrap>
-          <span>{`Form I-9 for ${i9Session.recipientName} is in progress (step ${i9Session.step + 1} of ${I9_STEPS.length}).`}</span>
-          <Button kind="secondary" size="small" onClick={() => setI9Phase('journey')}>Resume</Button>
+          <span>{`${i9Pending.recipientName} submitted Section 1 of Form I-9. Complete Section 2 by ${formatLongDate(addBusinessDays(i9Pending.startDate, 3))}.`}</span>
+          <Button kind="secondary" size="small" onClick={() => setI9Phase('section2')}>{i9Pending.section2 ? 'Resume Section 2' : 'Review Section 2'}</Button>
         </Inline>
       </Banner> : undefined}
     filterBar={<FilterBar className={isEnvelope ? 'template-list-filters' : undefined} search={{ value: search, onChange: onSearchChange, placeholder: `Search ${TEMPLATE_VIEW_LABELS[view]}` }} filters={<Inline gap="small">
@@ -2483,14 +3049,26 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     {(isEnvelope || view === 'elastic-templates') ? <Tabs className="template-screen-tabs" value={view === 'elastic-templates' ? 'elastic-template-list' : 'envelope-template-list'} onChange={tab => { onSearchChange(''); onNavigate(tab === 'elastic-template-list' ? 'elastic-templates' : 'my-templates'); }} tabs={[
       { id: 'envelope-template-list', label: 'Templates', content: list }, { id: 'elastic-template-list', label: 'Elastic Templates', content: list },
     ]} /> : list}
-    {i9Phase === 'setup' && i9Template && <I9SetupDialog template={i9Template} onCancel={() => setI9Phase('closed')} onStart={setup => {
+    {i9Phase === 'setup' && i9Template && <QuickSend template={i9Template} onCancel={() => setI9Phase('closed')} onStart={setup => {
       setI9Session({ ...setup, step: 0, personal: { firstName: '', lastName: '', otherNames: '', dob: '', address: '', city: '', state: '', zip: '', email: setup.recipientEmail, phone: '' }, authorization: { status: '', aNumber: '', expires: '' }, attested: false, signature: '' });
-      setI9Phase('journey');
+      setI9Phase('email');
     }} />}
-    {i9Phase === 'journey' && i9Session && <I9Journey session={i9Session} setSession={setI9Session} onExit={() => setI9Phase('closed')} onFinish={completed => {
-      setI9Phase('closed');
-      if (completed) setNotice(`Form I-9 Section 1 was submitted by ${i9Session.recipientName}. ${i9Session.employerName} will complete Section 2.`);
+    {i9Phase === 'email' && i9Session && <I9EmailNotification session={i9Session} onReview={() => setI9Phase('signing')} onClose={() => { setI9Phase('closed'); setI9Session(null); }} />}
+    {i9Phase === 'signing' && i9Session && <I9DocumentSigning session={i9Session} onClose={() => { setI9Phase('closed'); setI9Session(null); }} onComplete={(signed, action) => {
+      setI9Pending(signed);
+      if (action === 'verify') { setI9Session(signed); setI9Phase('onenotary'); return; }
       setI9Session(null);
+      setI9Phase('closed');
+      setNotice(`${signed.recipientName} signed Form I-9 and can continue verification from the email link.`);
+    }} />}
+    {i9Phase === 'onenotary' && i9Session && <I9OneNotary session={i9Session} onExit={() => {
+      setNotice(`${i9Session.recipientName} completed identity verification for Form I-9.`);
+      setI9Session(null);
+      setI9Phase('closed');
+    }} />}
+    {i9Phase === 'section2' && i9Pending && <I9Section2Journey session={i9Pending} setSession={setI9Pending} onExit={() => setI9Phase('closed')} onFinish={completed => {
+      setI9Phase('closed');
+      if (completed) { setNotice(`Form I-9 for ${i9Pending.recipientName} is complete.`); setI9Pending(null); }
     }} />}
     {showAdvancedSearch && <Modal open onClose={() => setShowAdvancedSearch(false)} title="Advanced search" size="medium" footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => setShowAdvancedSearch(false)}>Cancel</Button><Button kind="primary" onClick={() => { setAdvancedFilters(advancedDraft); setShowAdvancedSearch(false); }}>Apply filters</Button></Inline>}>
       <Stack gap="medium">
@@ -2509,7 +3087,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
         {preview.journey === 'i9' ? <Card radius="small"><Card.Header><Text size="md" weight="semibold">What’s included</Text></Card.Header><Card.Body><Stack gap="medium">
           <Text size="sm"><strong>Documents:</strong> Form I-9, Section 1 (employee) and Section 2 (employer review)</Text>
           <Text size="sm"><strong>Signers:</strong> New hire completes Section 1, then the employer representative completes Section 2</Text>
-          <Text size="sm"><strong>Employee steps:</strong> Instructions, personal information, work authorization, review, sign, complete</Text>
+          <Text size="sm"><strong>Employee experience:</strong> Email notification, then review and sign Form I-9 directly on the document</Text>
         </Stack></Card.Body></Card> : preview.document ? <TemplateDocumentPages template={preview} /> : <Card radius="small"><Card.Header><Text size="md" weight="semibold">{preview.kind === 'workflow' ? 'Workflow steps' : preview.kind === 'web-form' ? 'Form fields' : preview.kind === 'workspace' ? 'Workspace contents' : 'Template content'}</Text></Card.Header><Card.Body><Stack gap="medium">
           {preview.kind === 'workflow' ? <><Text size="sm">1. Collect agreement information</Text><Text size="sm">2. Request approval from the team</Text><Text size="sm">3. Send the agreement for signature</Text><Text size="sm">4. Notify the owner when completed</Text></> : preview.kind === 'web-form' ? <><Input label="Full name" placeholder="Enter your name" readOnly /><Input label="Email address" placeholder="name@company.com" readOnly /><Input label="Company" placeholder="Company name" readOnly /></> : preview.kind === 'workspace' ? <><Text size="sm">Agreement documents</Text><Text size="sm">Review and approval tasks</Text><Text size="sm">Shared contacts and activity</Text></> : <><Text size="sm" weight="semibold">{preview.name}</Text><Text size="sm">{preview.kind === 'clause' ? `${preview.description} The parties agree to the terms set out in this agreement, subject to the applicable statement of work and any written amendments.` : 'This template includes reusable agreement content. Add the parties, review the terms, and prepare a copy for your next agreement.'}</Text><Text size="xs" color="secondary">Prepared for Protolab · {preview.lastModified}</Text></>}
         </Stack></Card.Body></Card>}
@@ -3229,7 +3807,7 @@ function InsightsPage({ view, onNavigate, reports, onReportsChange, creator, onC
    (rendered inline via AgreementTableView)
    ═══════════════════════════════════════ */
 
-/* ═════════���═════════════════════════════
+/* ═════════���══════════��══════════════════
    Automations and Admin
    ═══════════════════════════════════════ */
 
@@ -5065,7 +5643,7 @@ function WorkspaceDetailView({ workspace, onClose }: { workspace: Workspace; onC
 
 /* ═══════════════════════════════════════
    Request Detail View
-   ═══════════════════════════════════════ */
+   ══════════════════════════���════════════ */
 
 function RequestInfoCard({ request }: { request: RequestItem }) {
   const requestType = request.requestType;
