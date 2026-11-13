@@ -254,7 +254,7 @@ type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | '
 type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ════════════════════════����══════════════
+/* ═════════════════���══════����══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -1730,7 +1730,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
 
 /* ═══════════════════════════════════════
    Requests Data (matches real DocuSign)
-   ═══════════════════════════════════════ */
+   ════════════════════════════════��══════ */
 
 interface RequestItem {
   id: string;
@@ -2049,6 +2049,29 @@ interface I9Session extends I9Setup {
   personal: { firstName: string; lastName: string; otherNames: string; dob: string; address: string; city: string; state: string; zip: string; email: string; phone: string };
   authorization: { status: '' | 'citizen' | 'national' | 'permanent' | 'authorized'; aNumber: string; expires: string };
   attested: boolean; signature: string; submittedAt?: string;
+  section2?: I9Section2Data;
+}
+interface I9Document { title: string; authority: string; number: string; expires: string }
+interface I9Section2Data {
+  step: number; route: '' | 'a' | 'bc'; docs: Record<'a' | 'b' | 'c', I9Document>;
+  repTitle: string; attested: boolean; signature: string; completedAt?: string;
+}
+
+const EMPTY_I9_DOCUMENT: I9Document = { title: '', authority: '', number: '', expires: '' };
+const EMPTY_SECTION2: I9Section2Data = { step: 0, route: '', docs: { a: EMPTY_I9_DOCUMENT, b: EMPTY_I9_DOCUMENT, c: EMPTY_I9_DOCUMENT }, repTitle: '', attested: false, signature: '' };
+const I9_SECTION2_STEPS = [
+  { id: 'review', title: 'Review Section 1' }, { id: 'documents', title: 'Verify documents' }, { id: 'sign', title: 'Sign' }, { id: 'complete', title: 'Complete' },
+];
+const I9_DOCUMENT_LISTS: Record<'a' | 'b' | 'c', { label: string; titles: string[] }> = {
+  a: { label: 'List A', titles: ['U.S. passport or passport card', 'Permanent Resident Card (Form I-551)', 'Employment Authorization Document (Form I-766)', 'Foreign passport with Form I-94'] },
+  b: { label: 'List B', titles: ['Driver’s license', 'State-issued ID card', 'School ID card with photograph', 'Voter registration card'] },
+  c: { label: 'List C', titles: ['Social Security account number card', 'Birth certificate issued by a state or local authority', 'Certification of report of birth (Form FS-545)'] },
+};
+function addBusinessDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00`);
+  let remaining = days;
+  while (remaining > 0) { date.setDate(date.getDate() + 1); if (date.getDay() !== 0 && date.getDay() !== 6) remaining -= 1; }
+  return date.toISOString().slice(0, 10);
 }
 
 const I9_STEPS = [
@@ -2397,6 +2420,121 @@ function I9Journey({ session, setSession, onExit, onFinish }: {
   </>;
 }
 
+function I9DocumentFields({ listKey, value, errors, onChange }: {
+  listKey: 'a' | 'b' | 'c'; value: I9Document; errors: Record<string, string>; onChange: (change: Partial<I9Document>) => void;
+}) {
+  const list = I9_DOCUMENT_LISTS[listKey];
+  return <Card radius="small"><Card.Header><Text size="md" weight="semibold">{list.label} document</Text></Card.Header><Card.Body><Stack gap="medium">
+    <Select label="Document title" required value={value.title} error={errors[`${listKey}.title`]} onChange={event => onChange({ title: event.target.value })}>
+      <option value="">Select a document</option>{list.titles.map(title => <option key={title} value={title}>{title}</option>)}
+    </Select>
+    <Grid columns={2} gap="medium">
+      <Input label="Issuing authority" required value={value.authority} error={errors[`${listKey}.authority`]} onChange={event => onChange({ authority: event.target.value })} />
+      <Input label="Document number" required value={value.number} error={errors[`${listKey}.number`]} onChange={event => onChange({ number: event.target.value })} />
+    </Grid>
+    {listKey !== 'c' && <Input label="Expiration date" type="date" value={value.expires} description="Optional. Leave blank if the document does not expire." onChange={event => onChange({ expires: event.target.value })} />}
+  </Stack></Card.Body></Card>;
+}
+
+function I9Section2Journey({ session, setSession, onExit, onFinish }: {
+  session: I9Session; setSession: React.Dispatch<React.SetStateAction<I9Session | null>>; onExit: () => void; onFinish: (completed: boolean) => void;
+}) {
+  const data = session.section2 ?? EMPTY_SECTION2;
+  const { step, route, docs } = data;
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const completed = step === I9_SECTION2_STEPS.length - 1;
+  const { personal, authorization } = session;
+  const employeeName = `${personal.firstName} ${personal.lastName}`.trim();
+  const deadline = formatLongDate(addBusinessDays(session.startDate, 3));
+  const authorizationLabel = I9_AUTHORIZATION_OPTIONS.find(option => option.value === authorization.status)?.label ?? '';
+
+  const patch = (change: Partial<I9Section2Data>) => setSession(current => current ? { ...current, section2: { ...(current.section2 ?? EMPTY_SECTION2), ...change } } : current);
+  const patchDoc = (key: 'a' | 'b' | 'c') => (change: Partial<I9Document>) => {
+    patch({ docs: { ...docs, [key]: { ...docs[key], ...change } } });
+    setErrors({});
+  };
+  const go = (next: number) => { setErrors({}); patch({ step: next }); };
+
+  const validateDocuments = () => {
+    const next: Record<string, string> = {};
+    if (!route) next.route = 'Choose which documents the employee presented.';
+    (route === 'a' ? ['a'] : route === 'bc' ? ['b', 'c'] : [] as string[]).forEach(key => {
+      const doc = docs[key as 'a' | 'b' | 'c'];
+      if (!doc.title) next[`${key}.title`] = 'Choose the document title.';
+      if (!doc.authority.trim()) next[`${key}.authority`] = 'Enter the issuing authority.';
+      if (!doc.number.trim()) next[`${key}.number`] = 'Enter the document number.';
+    });
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const next = () => {
+    if (step === 1 && !validateDocuments()) return;
+    go(step + 1);
+  };
+  const submit = () => {
+    if (submitting) return;
+    const problems: Record<string, string> = {};
+    if (!data.repTitle.trim()) problems.repTitle = 'Enter your job title.';
+    if (data.signature.trim().toLowerCase() !== session.employerName.toLowerCase()) problems.signature = `Type your name exactly as shown: ${session.employerName}`;
+    if (!data.attested) problems.attested = 'Confirm the statement to submit.';
+    setErrors(problems);
+    if (Object.keys(problems).length) return;
+    setSubmitting(true);
+    timer.current = window.setTimeout(() => {
+      setSubmitting(false);
+      patch({ step: 3, completedAt: new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' }) });
+    }, 1000);
+  };
+
+  const footer = completed ? <Button kind="primary" onClick={() => onFinish(true)}>Done</Button>
+    : <>{step > 0 ? <Button kind="secondary" onClick={() => go(step - 1)} disabled={submitting}>Back</Button> : <span />}
+      {step === 2 ? <Button kind="primary" loading={submitting} onClick={submit}>Complete Section 2</Button> : <Button kind="primary" onClick={next}>{step === 0 ? 'Continue to documents' : 'Continue to sign'}</Button>}</>;
+  const summary = (rows: [string, string][]) => <Grid columns={2} gap="medium">{rows.map(([label, value]) => <Stack key={label} gap="none"><Text size="xs" color="secondary">{label}</Text><Text size="sm">{value || 'Not provided'}</Text></Stack>)}</Grid>;
+  const docRows = (key: 'a' | 'b' | 'c'): [string, string][] => [[`${I9_DOCUMENT_LISTS[key].label} document`, docs[key].title], ['Issuing authority', docs[key].authority], ['Number', docs[key].number], ...(docs[key].expires ? [['Expires', formatLongDate(docs[key].expires)] as [string, string]] : [])];
+
+  return <JourneyShell title="Form I-9, Section 2" subtitle={`Employer review · ${employeeName || session.recipientName}`} steps={I9_SECTION2_STEPS} activeIndex={step} onExit={() => completed ? onFinish(true) : onExit()} footer={footer}>
+    {step === 0 ? <Stack gap="large">
+      <JourneyHeading title="Review Section 1" description={`${employeeName || session.recipientName} submitted Section 1 on ${session.submittedAt}.`} />
+      <Alert kind="warning" title={`Complete Section 2 by ${deadline}`}>Federal rules require you to examine original documents within 3 business days of the employee’s first day, {formatLongDate(session.startDate)}.</Alert>
+      <Card radius="small"><Card.Header><Text size="md" weight="semibold">Employee information</Text></Card.Header><Card.Body>
+        {summary([['Name', employeeName], ['Date of birth', formatLongDate(personal.dob)], ['Address', `${personal.address}, ${personal.city}, ${personal.state} ${personal.zip}`], ['Email', personal.email], ['Phone', personal.phone], ['Other last names', personal.otherNames]])}
+      </Card.Body></Card>
+      <Card radius="small"><Card.Header><Text size="md" weight="semibold">Work authorization attested by employee</Text></Card.Header><Card.Body>
+        {summary([['Status', authorizationLabel], ...(authorization.aNumber ? [['A-Number', authorization.aNumber] as [string, string]] : []), ...(authorization.expires ? [['Expires', formatLongDate(authorization.expires)] as [string, string]] : [])])}
+      </Card.Body></Card>
+    </Stack> : step === 1 ? <Stack gap="large">
+      <JourneyHeading title="Verify documents" description="Examine the original documents in person, then record what the employee presented." />
+      <fieldset className="journey-fieldset" aria-describedby={errors.route ? 'i9-route-error' : undefined}>
+        <legend className="sr-only">Documents presented</legend>
+        <Stack gap="medium">
+          <Radio name="i9-route" label="One List A document" description="Proves both identity and work authorization, such as a U.S. passport." checked={route === 'a'} onChange={() => { patch({ route: 'a' }); setErrors({}); }} />
+          <Radio name="i9-route" label="One List B and one List C document" description="List B proves identity and List C proves work authorization." checked={route === 'bc'} onChange={() => { patch({ route: 'bc' }); setErrors({}); }} />
+          {errors.route && <Text size="sm" color="error"><span id="i9-route-error">{errors.route}</span></Text>}
+        </Stack>
+      </fieldset>
+      {route === 'a' && <I9DocumentFields listKey="a" value={docs.a} errors={errors} onChange={patchDoc('a')} />}
+      {route === 'bc' && <><I9DocumentFields listKey="b" value={docs.b} errors={errors} onChange={patchDoc('b')} /><I9DocumentFields listKey="c" value={docs.c} errors={errors} onChange={patchDoc('c')} /></>}
+    </Stack> : step === 2 ? <Stack gap="large">
+      <JourneyHeading title="Sign Section 2" description="Confirm what you examined and sign electronically." />
+      <Card radius="small"><Card.Header><Text size="md" weight="semibold">Documents examined</Text></Card.Header><Card.Body><Stack gap="medium">
+        {(route === 'a' ? ['a'] : ['b', 'c']).map(key => <div key={key}>{summary(docRows(key as 'a' | 'b' | 'c'))}</div>)}
+        <Inline><Button kind="tertiary" size="small" onClick={() => go(1)}>Edit documents</Button></Inline>
+      </Stack></Card.Body></Card>
+      <Input label="Your job title" required autoComplete="organization-title" value={data.repTitle} error={errors.repTitle} onChange={event => { patch({ repTitle: event.target.value }); setErrors({}); }} />
+      <Checkbox label="I attest, under penalty of perjury, that I examined the documents above, they appear genuine and relate to the employee, and the employee began work on the date shown." checked={data.attested} error={!!errors.attested} errorMessage={errors.attested} showErrorMessage
+        onChange={event => { patch({ attested: event.target.checked }); setErrors({}); }} />
+      <Input label="Type your full name" required autoComplete="off" value={data.signature} error={errors.signature} description={`Must match: ${session.employerName}`} onChange={event => { patch({ signature: event.target.value }); setErrors({}); }} />
+      <Input label="Date signed" value={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} readOnly />
+    </Stack> : <Stack gap="large">
+      <JourneyHeading title="Form I-9 is complete" description={`Section 2 for ${employeeName} was signed on ${data.completedAt}.`} />
+      <Alert kind="success" title="What happens next">The completed form is stored with {employeeName}’s record. Keep it for 3 years after the hire date or 1 year after employment ends, whichever is later.</Alert>
+    </Stack>}
+  </JourneyShell>;
+}
+
 function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate }: {
   view: TemplatesSidebarView; onNavigate: (view: TemplatesSidebarView) => void; search: string; onSearchChange: (value: string) => void;
   items: TemplateItem[]; onItemsChange: React.Dispatch<React.SetStateAction<TemplateItem[]>>; editor: TemplateEditorState | null;
@@ -2412,8 +2550,9 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(25);
   const [i9Template, setI9Template] = useState<TemplateItem | null>(null);
-  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'journey'>('closed');
+  const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'journey' | 'section2'>('closed');
   const [i9Session, setI9Session] = useState<I9Session | null>(null);
+  const [i9Pending, setI9Pending] = useState<I9Session | null>(null);
   const kind = templateKindForView(view);
   const isEnvelope = ['my-templates', 'shared-with-me', 'favorites', 'all-templates'].includes(view);
   useEffect(() => { setPage(1); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); setNotice(''); }, [view]);
@@ -2486,6 +2625,11 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
           <span>{`Form I-9 for ${i9Session.recipientName} is in progress (step ${i9Session.step + 1} of ${I9_STEPS.length}).`}</span>
           <Button kind="secondary" size="small" onClick={() => setI9Phase('journey')}>Resume</Button>
         </Inline>
+      </Banner> : i9Pending && i9Phase === 'closed' ? <Banner kind="information">
+        <Inline gap="medium" align="center" wrap>
+          <span>{`${i9Pending.recipientName} submitted Section 1 of Form I-9. Complete Section 2 by ${formatLongDate(addBusinessDays(i9Pending.startDate, 3))}.`}</span>
+          <Button kind="secondary" size="small" onClick={() => setI9Phase('section2')}>{i9Pending.section2 ? 'Resume Section 2' : 'Review Section 2'}</Button>
+        </Inline>
       </Banner> : undefined}
     filterBar={<FilterBar className={isEnvelope ? 'template-list-filters' : undefined} search={{ value: search, onChange: onSearchChange, placeholder: `Search ${TEMPLATE_VIEW_LABELS[view]}` }} filters={<Inline gap="small">
       {isEnvelope ? <>
@@ -2513,8 +2657,12 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     }} />}
     {i9Phase === 'journey' && i9Session && <I9Journey session={i9Session} setSession={setI9Session} onExit={() => setI9Phase('closed')} onFinish={completed => {
       setI9Phase('closed');
-      if (completed) setNotice(`Form I-9 Section 1 was submitted by ${i9Session.recipientName}. ${i9Session.employerName} will complete Section 2.`);
+      if (completed) setI9Pending(i9Session);
       setI9Session(null);
+    }} />}
+    {i9Phase === 'section2' && i9Pending && <I9Section2Journey session={i9Pending} setSession={setI9Pending} onExit={() => setI9Phase('closed')} onFinish={completed => {
+      setI9Phase('closed');
+      if (completed) { setNotice(`Form I-9 for ${i9Pending.recipientName} is complete.`); setI9Pending(null); }
     }} />}
     {showAdvancedSearch && <Modal open onClose={() => setShowAdvancedSearch(false)} title="Advanced search" size="medium" footer={<Inline justify="end" gap="small"><Button kind="secondary" onClick={() => setShowAdvancedSearch(false)}>Cancel</Button><Button kind="primary" onClick={() => { setAdvancedFilters(advancedDraft); setShowAdvancedSearch(false); }}>Apply filters</Button></Inline>}>
       <Stack gap="medium">
@@ -3253,7 +3401,7 @@ function InsightsPage({ view, onNavigate, reports, onReportsChange, creator, onC
    (rendered inline via AgreementTableView)
    ═══════════════════════════════════════ */
 
-/* ═════════���═════════════════════════════
+/* ═════════���══════════��══════════════════
    Automations and Admin
    ═══════════════════════════════════════ */
 
@@ -5089,7 +5237,7 @@ function WorkspaceDetailView({ workspace, onClose }: { workspace: Workspace; onC
 
 /* ═══════════════════════════════════════
    Request Detail View
-   ═══════════════════════════════════════ */
+   ══════════════════════════���════════════ */
 
 function RequestInfoCard({ request }: { request: RequestItem }) {
   const requestType = request.requestType;
