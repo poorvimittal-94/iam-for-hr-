@@ -590,10 +590,6 @@ img, svg { display: block; max-width: 100%; }
 .journey-footer { border-top: var(--ink-border-width-xs, 1px) solid var(--ink-border-color-subtle); padding: var(--ink-spacing-200) var(--ink-spacing-300); background: var(--ink-bg-color-default, #fff); }
 .journey-footer-inner { max-width: 680px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: var(--ink-spacing-200); }
 .journey-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-.template-featured-body { display: flex; align-items: center; gap: var(--ink-spacing-300); flex-wrap: wrap; }
-.template-featured-body > :nth-child(2) { flex: 1; min-width: 260px; }
-.template-featured-icon { width: 56px; height: 56px; border-radius: var(--ink-radius-md, 12px); display: grid; place-items: center; background: var(--ink-cobalt-10, #eef0ff); color: var(--ink-cobalt-90, #4c00ff); flex: none; }
-.template-featured-title { margin: 0; font-size: var(--ink-font-heading-s-size, 22px); font-weight: var(--ink-font-weight-medium, 500); }
 @media (max-width: 720px) {
   .journey-main { padding-block: var(--ink-spacing-300); }
   .journey-step-title { font-size: var(--ink-font-heading-s-size, 22px); }

@@ -251,7 +251,7 @@ function FadeIn({ children, keyProp: _keyProp }: { children: React.ReactNode; ke
 
 type TabId = 'home' | 'agreements' | 'templates' | 'automations' | 'insights' | 'admin' | 'scenarios' | 'tokens';
 type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | 'deleted' | 'parties' | 'parties-organizations' | 'parties-people' | 'requests' | 'workspaces' | 'powerforms';
-type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'template-gallery' | 'elastic-templates';
+type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
 /* ════════════════════════����══════════════
@@ -1905,7 +1905,7 @@ const TEMPLATE_VIEW_LABELS: Record<TemplatesSidebarView, string> = {
   'my-templates': 'My Templates', 'shared-with-me': 'Shared with Me', favorites: 'Favorites', 'all-templates': 'All Templates',
   clauses: 'Clauses', 'document-templates': 'Document Templates', 'workspace-templates': 'Workspace Templates',
   'workflow-templates': 'Workflow Templates', 'my-web-forms': 'My Web Forms', 'shared-web-forms': 'Shared Web Forms',
-  'all-web-forms': 'All Web Forms', 'template-gallery': 'Template Gallery', 'elastic-templates': 'Elastic Templates',
+  'all-web-forms': 'All Web Forms', 'elastic-templates': 'Elastic Templates',
 };
 
 const TEMPLATE_KINDS: Record<TemplateLibraryKind, { label: string; icon: string; view: TemplatesSidebarView; description: string }> = {
@@ -1939,7 +1939,7 @@ const TEMPLATES_DATA: TemplateItem[] = [
   { id: '8', name: 'Vendor Onboarding', description: 'New vendor setup and compliance form', owner: 'Procurement', lastModified: '12/08/2025', shared: true, uses: 45, favorited: false },
   { id: '9', name: 'Employment Agreement', description: 'Full-time employment agreement', owner: 'HR Department', lastModified: '03/01/2026', shared: true, uses: 178, favorited: false },
   { id: '10', name: 'Change Order', description: 'Amendment to existing SOW or contract', owner: 'Akshat Mishra', lastModified: '03/22/2026', shared: false, uses: 3, favorited: false },
-  { id: 'i9', name: 'Form I-9: Employment Eligibility Verification', description: 'Verify identity and work authorization for every new hire. The employee completes Section 1, then your team completes Section 2.', owner: 'People Team', lastModified: '10/23/2026', shared: true, uses: 31, favorited: true, journey: 'i9' },
+  { id: 'i9', name: 'Form I-9: Employment Eligibility Verification', description: 'Verify identity and work authorization for every new hire. The employee completes Section 1, then your team completes Section 2.', owner: 'People Team', lastModified: '10/23/2026', shared: true, uses: 31, favorited: true, journey: 'i9', created: '10/23/2026', folder: 'HR onboarding' },
 ];
 
 function templateDocumentUrl(template: TemplateItem, page?: number) {
@@ -2368,7 +2368,7 @@ function I9Journey({ session, setSession, onExit, onFinish }: {
     </JourneyShell>
     {confirmExit && <Modal open size="small" title="Exit this form?" onClose={() => setConfirmExit(false)}
       footer={<Inline justify="end" gap="small"><Button kind="tertiary" onClick={() => onFinish(false)}>Discard answers</Button><Button kind="secondary" onClick={() => setConfirmExit(false)}>Keep going</Button><Button kind="primary" onClick={() => { setConfirmExit(false); onExit(); }}>Save and exit</Button></Inline>}>
-      <Text size="md">Your answers are saved. You can resume from the Template Gallery.</Text>
+      <Text size="md">Your answers are saved. You can resume from Templates.</Text>
     </Modal>}
   </>;
 }
@@ -2387,17 +2387,14 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   const [notice, setNotice] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(25);
-  const [galleryCategory, setGalleryCategory] = useState('All');
   const [i9Template, setI9Template] = useState<TemplateItem | null>(null);
   const [i9Phase, setI9Phase] = useState<'closed' | 'setup' | 'journey'>('closed');
   const [i9Session, setI9Session] = useState<I9Session | null>(null);
   const kind = templateKindForView(view);
-  const isGallery = view === 'template-gallery';
   const isEnvelope = ['my-templates', 'shared-with-me', 'favorites', 'all-templates'].includes(view);
   useEffect(() => { setPage(1); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); setNotice(''); }, [view]);
   useEffect(() => { setPage(1); }, [search, status, dateRange, advancedFilters]);
   const viewTemplates = items.filter(item => {
-    if (isGallery) return (item.status ?? 'Published') === 'Published';
     if ((item.kind ?? 'envelope') !== kind) return false;
     if (view === 'my-templates' || view === 'my-web-forms') return item.owner === 'Akshat Mishra';
     if (view === 'shared-with-me' || view === 'shared-web-forms') return item.shared && item.owner !== 'Akshat Mishra';
@@ -2406,7 +2403,6 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
   });
   const filteredTemplates = viewTemplates.filter(item => {
     if (search && !`${item.name} ${item.description} ${item.owner}`.toLowerCase().includes(search.toLowerCase())) return false;
-    if (isGallery && galleryCategory !== 'All' && TEMPLATE_KINDS[item.kind ?? 'envelope'].label !== galleryCategory) return false;
     if (!isEnvelope) return status === 'All statuses' || (item.status ?? 'Published') === status;
     if (advancedFilters.owner && !item.owner.toLowerCase().includes(advancedFilters.owner.toLowerCase())) return false;
     if (advancedFilters.sharedOnly && !item.shared) return false;
@@ -2422,7 +2418,7 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     }
     return true;
   });
-  const clearFilters = () => { onSearchChange(''); setGalleryCategory('All'); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); };
+  const clearFilters = () => { onSearchChange(''); setStatus('All statuses'); setDateRange('Any time'); setAdvancedFilters({ owner: '', status: 'All statuses', sharedOnly: false }); };
   const toggleFavorite = (item: TemplateItem) => onItemsChange(current => current.map(row => row.id === item.id ? { ...row, favorited: !row.favorited } : row));
   const duplicate = (item: TemplateItem) => {
     onItemsChange(current => [{ ...item, id: crypto.randomUUID(), name: `${item.name} (copy)`, owner: 'Akshat Mishra', shared: false, status: 'Draft', uses: 0, lastModified: new Date().toLocaleDateString('en-US') }, ...current]);
@@ -2473,35 +2469,14 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
         <Button kind="secondary" size="small" menuTrigger onClick={() => { setAdvancedDraft(advancedFilters); setShowAdvancedSearch(true); }}>Advanced search</Button>
         <Button kind="tertiary" size="small" onClick={clearFilters}>Clear</Button>
       </> : <>
-        {isGallery
-          ? <Dropdown items={['All', ...Object.values(TEMPLATE_KINDS).map(entry => entry.label)].map(value => ({ label: value, selected: galleryCategory === value, onClick: () => setGalleryCategory(value) }))}><Button kind="secondary" size="small" menuTrigger>{galleryCategory === 'All' ? 'All categories' : galleryCategory}</Button></Dropdown>
-          : <Dropdown items={['All statuses', 'Published', 'Draft'].map(value => ({ label: value, selected: status === value, onClick: () => setStatus(value) }))}><Button kind="secondary" size="small" menuTrigger>{status}</Button></Dropdown>}
-        {(search || status !== 'All statuses' || galleryCategory !== 'All') && <Button kind="tertiary" size="small" onClick={clearFilters}>Clear</Button>}
+        <Dropdown items={['All statuses', 'Published', 'Draft'].map(value => ({ label: value, selected: status === value, onClick: () => setStatus(value) }))}><Button kind="secondary" size="small" menuTrigger>{status}</Button></Dropdown>
+        {(search || status !== 'All statuses') && <Button kind="tertiary" size="small" onClick={clearFilters}>Clear</Button>}
       </>}
     </Inline>} />}
   >
     <Stack gap="medium">
-    {!isEnvelope && <Text size="sm" color="secondary">{isGallery ? 'Find a starting point, then customize a copy for your team.' : TEMPLATE_KINDS[kind].description}</Text>}
-    {isGallery ? <Stack gap="large">
-      {filteredTemplates.filter(item => item.journey === 'i9').map(item => <Card key={item.id} radius="large" className="template-featured"><Card.Body>
-        <div className="template-featured-body">
-          <div className="template-featured-icon" aria-hidden="true"><Icon name="document" size="medium" /></div>
-          <Stack gap="small">
-            <Inline gap="small" wrap><Badge kind="subtle" text="HR" /><Badge kind="subtle" text="New hire onboarding" /><Badge kind="success" text="Published" /></Inline>
-            <h2 className="template-featured-title">{item.name}</h2>
-            <Text size="md" color="secondary">{item.description}</Text>
-            <Text size="sm" color="secondary">6 steps for the employee · about 10 minutes · used {item.uses} times</Text>
-          </Stack>
-          <Inline gap="small" className="template-featured-actions"><Button kind="secondary" onClick={() => setPreview(item)}>Preview</Button><Button kind="primary" onClick={() => useTemplate(item)}>Use template</Button></Inline>
-        </div>
-      </Card.Body></Card>)}
-      <Grid columns="auto" gap="medium">{filteredTemplates.filter(item => item.journey !== 'i9').map(item => <Card key={item.id} radius="large">
-        {item.document ? <Card.Image src={templateDocumentUrl(item, 1)} alt={`First page of ${item.name}`} imageSpacing="document-preview" ratio="1:1" /> : <Card.Header><Inline justify="between"><Icon name={TEMPLATE_KINDS[item.kind ?? 'envelope'].icon} size="medium" /><Badge kind="subtle" text={TEMPLATE_KINDS[item.kind ?? 'envelope'].label} /></Inline></Card.Header>}
-        <Card.Body><Stack gap="small"><Text size="md" weight="semibold">{item.name}</Text><Text size="sm" color="secondary">{item.description}</Text></Stack></Card.Body>
-        <Card.Footer><Inline gap="small" wrap><Button kind="secondary" size="small" onClick={() => setPreview(item)}>Preview</Button><Button kind="tertiary" size="small" onClick={() => useTemplate(item)}>{(item.kind ?? 'envelope') === 'envelope' || item.kind === 'workflow' ? 'Use template' : 'Create a copy'}</Button></Inline></Card.Footer>
-      </Card>)}</Grid>
-    </Stack> : <DataTable className="template-list-table" columns={columns} data={filteredTemplates.slice((page - 1) * pageSize, page * pageSize)} getRowKey={item => item.id} selectable stickyHeader showColumnControl rowHeight="tall" onRowClick={setPreview} emptyMessage="No templates match your search" pagination={{ page, pageSize, totalItems: filteredTemplates.length, onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1); }, showInfo: true }} />}
-    {isGallery && filteredTemplates.length === 0 && <EmptyState header={<EmptyState.Header text="No templates found" />} callToAction={<Button kind="secondary" onClick={clearFilters}>Clear filters</Button>}>Try another name or category.</EmptyState>}
+    {!isEnvelope && <Text size="sm" color="secondary">{TEMPLATE_KINDS[kind].description}</Text>}
+    <DataTable className="template-list-table" columns={columns} data={filteredTemplates.slice((page - 1) * pageSize, page * pageSize)} getRowKey={item => item.id} selectable stickyHeader showColumnControl rowHeight="tall" onRowClick={setPreview} emptyMessage="No templates match your search" pagination={{ page, pageSize, totalItems: filteredTemplates.length, onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1); }, showInfo: true }} />
     </Stack>
   </AgreementTableView>;
   return <>
@@ -5799,7 +5774,6 @@ function PrototypeApp() {
           { id: 'all-web-forms', label: 'All Web Forms', icon: 'globe-language' as const, nested: true, onClick: () => navigateTemplateView('all-web-forms') },
         ],
       },
-      { id: 'template-gallery', items: [{ id: 'template-gallery', label: 'Template Gallery', icon: 'layout-grid' as const, onClick: () => navigateTemplateView('template-gallery') }] },
     ],
   };
 
