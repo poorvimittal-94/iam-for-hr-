@@ -1650,10 +1650,50 @@ interface PartiesPageProps {
   organizationsData: Organization[];
   peopleData: Person[];
   onMerge: (type: PartiesView, merged: Organization | Person, removedIds: string[]) => void;
+  hub: PeopleHubState;
+  onOpenHubSettings: () => void;
+  onImportRoster: (fileName: string) => void;
 }
 
-function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge }: PartiesPageProps) {
+function RosterImportModal({ onClose, onImported }: { onClose: () => void; onImported: (fileName: string) => void }) {
+  const [files, setFiles] = useState<FileInputFile[]>([]);
+  const [phase, setPhase] = useState<'upload' | 'processing' | 'done'>('upload');
+  const [error, setError] = useState('');
+  const fileName = files[0]?.file.name ?? '';
+  const startImport = () => {
+    if (!fileName.toLowerCase().endsWith('.csv')) { setError('Invalid file. Please use the provided template.'); return; }
+    setError('');
+    setPhase('processing');
+    window.setTimeout(() => { setPhase('done'); onImported(fileName); }, 1500);
+  };
+  return (
+    <Modal open onClose={onClose} title="Upload a CSV of employee records" size="medium" footer={
+      <Inline gap="small" justify="end">
+        <Button kind="secondary" onClick={onClose}>{phase === 'done' ? 'Close' : 'Cancel'}</Button>
+        {phase === 'upload' && <Button kind="primary" disabled={!files.length} onClick={startImport}>Import</Button>}
+      </Inline>
+    }>
+      {phase === 'upload' && (
+        <Stack gap="large">
+          <Text size="sm" color="secondary">Records in the CSV are matched to existing profiles in People Hub. New profiles are created when Docusign AI processes agreements for those employees.</Text>
+          <FileInput label="Employee records (.csv)" accept=".csv" value={files} onChange={(next) => { setFiles(next.slice(-1)); setError(''); }} error={error} />
+        </Stack>
+      )}
+      {phase === 'processing' && <Inline gap="small" align="center"><Spinner /><Text size="sm">{`Processing ${fileName}…`}</Text></Inline>}
+      {phase === 'done' && (
+        <Stack gap="small">
+          <Text weight="semibold">Import complete</Text>
+          <Text size="sm" color="secondary">{`${fileName} was uploaded. Matching profiles are updated now; other records appear as agreements are processed, which may take up to two days.`}</Text>
+        </Stack>
+      )}
+    </Modal>
+  );
+}
+
+function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge, hub, onOpenHubSettings, onImportRoster }: PartiesPageProps) {
   const isOrganizations = view === 'organizations';
+  const [importOpen, setImportOpen] = useState(false);
+  const peopleHubOff = !isOrganizations && !hub.enabled;
   const { toast } = useToast();
   const forceEmpty = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('parties') === 'empty';
 
@@ -1775,13 +1815,14 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
             aiBadgeText="AI-Assisted"
             actions={
               <>
+                {!isOrganizations && <Button kind="secondary" size="small" disabled={!hub.enabled} onClick={() => setImportOpen(true)}>Upload a CSV</Button>}
                 <IconButton icon="chart-bar" variant="tertiary" size="small" aria-label="Analytics" />
                 <Button kind="primary" size="small" onClick={onAskIris} startElement={<IrisIconInverse size={20} />} className="iris-ask-button">Ask Iris</Button>
               </>
             }
           />
           {isOrganizations && <Text size="sm" color="secondary">Companies you have agreements with, including your own entities.</Text>}
-          {!isOrganizations && bannerOpen && (
+          {!isOrganizations && hub.enabled && bannerOpen && (
             <Banner kind="promo" customIcon={<IrisIcon size={20} />} onClose={() => setBannerOpen(false)}>
               {'You have '}<strong>48 parties</strong>{' with similar names. We suggest merging these parties for more accurate reporting. '}
               <Link kind="subtle" href="#review-merge" onClick={(event) => { event.preventDefault(); setSuggestedOpen(true); }}>Review and Merge</Link>
@@ -1807,7 +1848,17 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
         />
       }
     >
-      {forceEmpty && !loading ? (
+      {peopleHubOff && !loading ? (
+        <EmptyState
+          direction="column"
+          alignment="center"
+          image={<Icon name="building-person" />}
+          header={<EmptyState.Header text="No people yet" />}
+          callToAction={<Button kind="primary" onClick={onOpenHubSettings}>Turn On Agreement Manager for HR</Button>}
+        >
+          People Hub is turned off for this account. An admin can turn on automatic HR agreement processing to build people profiles from your HR agreements.
+        </EmptyState>
+      ) : forceEmpty && !loading ? (
         <EmptyState
           direction="column"
           alignment="center"
@@ -1821,6 +1872,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
       ) : (
         <DataTable {...tableProps} columns={personColumns} data={people} getRowKey={(row) => row.id} />
       )}
+      {importOpen && <RosterImportModal onClose={() => setImportOpen(false)} onImported={onImportRoster} />}
       {isOrganizations && mergeOpen && !mergeBlocker && (
         <MergeFlow type={view} records={selectedOrganizations} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />
       )}
@@ -3288,7 +3340,7 @@ const REPORTS_DATA: ReportItem[] = [
 
 /* ═══════════════════════════════════════
    Home Page
-   ═══════════════════════════════════════ */
+   ═══════════════════��═══════════════════ */
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -3928,7 +3980,7 @@ function InsightsPage({ view, onNavigate, reports, onReportsChange, creator, onC
 
 /* ═════════���══════════��══════════════════
    Automations and Admin
-   ═══════════════════════════════════════ */
+   ═══════════════════���═══════════════════ */
 
 interface Workflow {
   id: string;
@@ -4357,7 +4409,7 @@ function AddUserDialog({ users, onClose, onSave }: { users: AccountUser[]; onClo
 const ADMIN_VIEW_LABELS = {
   overview: 'Overview', 'plan-billing': 'Plan and Billing', 'account-settings': 'Account Profile',
   'system-status': 'System Status', security: 'Security Settings', 'regional-settings': 'Regional Settings', branding: 'Brands',
-  updates: 'Updates', sandbox: 'Sandbox', 'value-calculator': 'Value Calculator', 'sound-settings': 'Sound Settings', 'ai-controls': 'AI Control Settings',
+  updates: 'Updates', sandbox: 'Sandbox', 'value-calculator': 'Value Calculator', 'sound-settings': 'Sound Settings', 'ai-controls': 'AI controls',
   users: 'Users', 'permission-profiles': 'Permission Profiles', groups: 'Groups', 'signing-groups': 'Signing Groups',
   'signing-settings': 'Signing Settings', 'sending-settings': 'Sending Settings', 'workspace-settings': 'Workspaces Settings',
   'identity-verification': 'Identity Verification', 'email-preferences': 'Email Preferences', 'email-archive': 'Email Archive Configuration',
@@ -4394,7 +4446,6 @@ interface AdminSettingField { id: string; label: string; description?: string; o
 const ADMIN_SETTING_PAGES: Partial<Record<AdminView, { description: string; fields: AdminSettingField[] }>> = {
   'regional-settings': { description: 'Choose the language, time zone, and date format used by your account.', fields: [{ id: 'language', label: 'Default language', options: ['English (US)', 'English (UK)', 'French', 'German', 'Spanish'] }, { id: 'timezone', label: 'Time zone', options: ['Pacific Time (US & Canada)', 'Eastern Time (US & Canada)', 'London'] }, { id: 'date-format', label: 'Date format', options: ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'] }] },
   'sound-settings': { description: 'Choose when Docusign plays a sound.', fields: [{ id: 'completion-sound', label: 'Play a sound when signing is complete' }, { id: 'notification-sound', label: 'Play notification sounds' }] },
-  'ai-controls': { description: 'Manage access to AI features for your account.', fields: [{ id: 'iris-enabled', label: 'Allow users to use Iris' }, { id: 'agreement-insights', label: 'Enable AI agreement insights' }] },
   'workspace-settings': { description: 'Set how teams organize and share agreements in workspaces.', fields: [{ id: 'workspace-creation', label: 'Allow users to create workspaces' }, { id: 'external-collaboration', label: 'Allow external collaborators' }] },
   'identity-verification': { description: 'Choose the identity verification options available to senders.', fields: [{ id: 'phone-verification', label: 'Allow phone authentication' }, { id: 'id-verification', label: 'Allow identity verification' }, { id: 'access-code', label: 'Allow recipient access codes' }] },
   'email-preferences': { description: 'Set which agreement updates are sent by email.', fields: [{ id: 'recipient-updates', label: 'Notify recipients when an agreement is completed' }, { id: 'sender-updates', label: 'Notify senders about recipient activity' }] },
@@ -4446,10 +4497,44 @@ function AdminSection({ title, description, children }: { title: string; descrip
   </Stack></Card.Body></Card>;
 }
 
-function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onNavigate }: {
+const ADMIN_ACCOUNT_ID = '48217603';
+
+interface PeopleHubState { enabled: boolean; roster: string | null; }
+
+function AiControlsSettings({ hub, onHubEnabledChange, onOpenPeopleHub }: {
+  hub: PeopleHubState; onHubEnabledChange: (enabled: boolean) => void; onOpenPeopleHub: () => void;
+}) {
+  const [anonymizedData, setAnonymizedData] = useState(false);
+  const [aiAssistant, setAiAssistant] = useState(true);
+  return <Stack gap="large" style={{ maxWidth: 720 }}>
+    <Text size="sm" color="secondary">{`Manage AI-powered features for account ${ADMIN_ACCOUNT_ID}. These settings apply to every user in the account.`}</Text>
+    <AdminSection title="AI data controls" description="Manage how data is used for AI training. This helps us improve our products and solutions.">
+      <Switch label="Allow my anonymized data to be used to improve AI-assisted experiences" checked={anonymizedData} onChange={setAnonymizedData} />
+    </AdminSection>
+    <AdminSection title="AI features" description="Manage AI services for all users in your account.">
+      <Switch label="AI assistant and Agent Studio" description="Iris AI assistant and agents across Docusign, including ready-to-use and custom agents you can create." checked={aiAssistant} onChange={setAiAssistant} />
+      <Divider />
+      <Stack gap="small">
+        <Switch
+          label="Automatic HR agreement processing"
+          description={`Turns on People Hub for account ${ADMIN_ACCOUNT_ID}. Docusign AI processes HR agreements to build people profiles for everyone in the account. Before you turn this on, connect a supported HR system in the Docusign App Center (for example, the Workday Extension App). You can also upload a CSV of employee records in People Hub. Processing may take up to two days.`}
+          checked={hub.enabled}
+          onChange={onHubEnabledChange}
+        />
+        {hub.enabled && <Inline gap="small" align="center" wrap>
+          <Text size="sm" color="secondary">People Hub is on for this account.</Text>
+          <Button kind="secondary" size="small" onClick={onOpenPeopleHub}>Go to People Hub</Button>
+        </Inline>}
+      </Stack>
+    </AdminSection>
+  </Stack>;
+}
+
+function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onNavigate, hub, onHubEnabledChange, onOpenPeopleHub }: {
   users: AccountUser[]; onUsersChange: React.Dispatch<React.SetStateAction<AccountUser[]>>;
   settings: AccountSettings; onSettingsChange: (settings: AccountSettings) => void;
   view: AdminView; onNavigate: (view: AdminView) => void;
+  hub: PeopleHubState; onHubEnabledChange: (enabled: boolean) => void; onOpenPeopleHub: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('Active and pending');
@@ -4636,8 +4721,8 @@ function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onN
     <Button kind="tertiary" size="small" onClick={() => { setSearch(''); setStatus('All statuses'); setPermissionFilter('All'); setGroupFilter('All'); setPage(1); }}>Clear All</Button>
   </Inline>;
   return <>
-    <AgreementTableView paddingVariant="compact" pageHeader={view === 'overview' ? null : <Stack gap="large"><PageHeader title={ADMIN_VIEW_LABELS[view]} actions={actions} />{view === 'users' && usersToolbar}</Stack>} banner={notice ? <Banner kind="success" onClose={() => setNotice('')}>{notice}</Banner> : undefined} filterBar={listViews.includes(view) ? <FilterBar search={{ value: search, onChange: value => { setSearch(value); setPage(1); }, placeholder: view === 'users' ? 'Search Here' : `Search ${ADMIN_VIEW_LABELS[view].toLowerCase()}` }} filters={view === 'users' ? userFilters : undefined} /> : null}>
-      {view === 'overview' ? overview : view === 'users' ? userList : view === 'groups' || view === 'signing-groups' ? <DataTable key={`admin-${view}`} columns={groupColumns} data={groups.filter(group => matchingIds.has(group.id))} getRowKey={group => group.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No groups match your search" pagination={resourcePagination} />
+    <AgreementTableView paddingVariant="compact" pageHeader={view === 'overview' ? null : <Stack gap="large"><PageHeader title={view === 'ai-controls' ? 'AI Control Settings' : ADMIN_VIEW_LABELS[view]} actions={actions} />{view === 'users' && usersToolbar}</Stack>} banner={notice ? <Banner kind="success" onClose={() => setNotice('')}>{notice}</Banner> : undefined} filterBar={listViews.includes(view) ? <FilterBar search={{ value: search, onChange: value => { setSearch(value); setPage(1); }, placeholder: view === 'users' ? 'Search Here' : `Search ${ADMIN_VIEW_LABELS[view].toLowerCase()}` }} filters={view === 'users' ? userFilters : undefined} /> : null}>
+      {view === 'overview' ? overview : view === 'ai-controls' ? <AiControlsSettings hub={hub} onHubEnabledChange={onHubEnabledChange} onOpenPeopleHub={onOpenPeopleHub} /> : view === 'users' ? userList : view === 'groups' || view === 'signing-groups' ? <DataTable key={`admin-${view}`} columns={groupColumns} data={groups.filter(group => matchingIds.has(group.id))} getRowKey={group => group.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No groups match your search" pagination={resourcePagination} />
         : view === 'permission-profiles' ? <DataTable key="admin-profiles" columns={profileColumns} data={profiles.filter(profile => matchingIds.has(profile.id))} getRowKey={profile => profile.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No permission profiles match your search" pagination={resourcePagination} />
         : view === 'integrations' ? <DataTable key="admin-connections" columns={connectionColumns} data={connections.filter(connection => matchingIds.has(connection.id))} getRowKey={connection => connection.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No connected apps match your search" pagination={resourcePagination} />
         : isSettingsView ? <form id={settingsFormId} onSubmit={event => { event.preventDefault(); if (!draft.name.trim()) return; const saved = { ...draft, name: draft.name.trim() }; setDraft(saved); onSettingsChange(saved); setNotice(`${ADMIN_VIEW_LABELS[view]} saved.`); }}>{view === 'account-settings' ? settingsView : pageConfiguration ? genericSettings : configuration}</form>
@@ -5762,7 +5847,7 @@ function WorkspaceDetailView({ workspace, onClose }: { workspace: Workspace; onC
 
 /* ═══════════════════════════════════════
    Request Detail View
-   ══════════════════════════���════════════ */
+   ════════════════���═════════���════════════ */
 
 function RequestInfoCard({ request }: { request: RequestItem }) {
   const requestType = request.requestType;
@@ -6078,6 +6163,8 @@ function PrototypeApp() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('completed');
   const [organizationsData, setOrganizationsData] = useState<Organization[]>(ORGANIZATIONS_DATA);
   const [peopleData, setPeopleData] = useState<Person[]>(PEOPLE_DATA);
+  const [peopleHub, setPeopleHub] = useState<PeopleHubState>({ enabled: false, roster: null });
+  const setPeopleHubEnabled = (enabled: boolean) => setPeopleHub(enabled ? { enabled, roster: peopleHub.roster } : { enabled: false, roster: null });
 
   const mergePartyRecords = (type: PartiesView, merged: Organization | Person, removedIds: string[]) => {
     if (type === 'organizations') {
@@ -6615,6 +6702,9 @@ function PrototypeApp() {
       organizationsData={organizationsData}
       peopleData={peopleData}
       onMerge={mergePartyRecords}
+      hub={peopleHub}
+      onOpenHubSettings={() => { handleTabClick('admin'); setAdminView('ai-controls'); }}
+      onImportRoster={roster => setPeopleHub(current => ({ ...current, roster }))}
     />
   ) : (
     <AgreementTableView
@@ -6792,7 +6882,7 @@ function PrototypeApp() {
     templates: templatesContent,
     automations: <AutomationsPage workflows={workflows} onChange={setWorkflows} view={automationView} onNavigate={setAutomationView} />,
     insights: insightsContent,
-    admin: <AdminPage users={accountUsers} onUsersChange={setAccountUsers} settings={accountSettings} onSettingsChange={setAccountSettings} view={adminView} onNavigate={setAdminView} />,
+    admin: <AdminPage users={accountUsers} onUsersChange={setAccountUsers} settings={accountSettings} onSettingsChange={setAccountSettings} view={adminView} onNavigate={setAdminView} hub={peopleHub} onHubEnabledChange={setPeopleHubEnabled} onOpenPeopleHub={() => { handleTabClick('agreements'); setSidebarView('parties-people'); }} />,
     scenarios: <ScenariosPage onRun={runScenario} />,
     tokens: <TokenPreviewPage />,
   };
