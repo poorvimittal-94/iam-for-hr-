@@ -1820,49 +1820,127 @@ interface PartiesPageProps {
   onMerge: (type: PartiesView, merged: Organization | Person, removedIds: string[]) => void;
   hub: PeopleHubState;
   onOpenHubSettings: () => void;
-  onImportRoster: (fileName: string) => void;
+  onImportRoster: (roster: RosterSummary) => void;
+  onShowProfiles: () => void;
 }
 
-function RosterImportModal({ onClose, onImported }: { onClose: () => void; onImported: (fileName: string) => void }) {
+const ROSTER_TEMPLATE_COLUMNS = ['employee_id', 'personal_email', 'work_email', 'first_name', 'last_name', 'phone'];
+const ROSTER_RESULT = { processed: 6, added: 3, matched: 1, review: 4 };
+const ROSTER_PROBLEM_ROWS = [
+  { row: 2, name: 'First3 Last3', personal: 'first3.last3@gmail.com', work: 'first3.last3@work.com', phone: '555-000-0003', id: 'EMP_003', reason: 'Duplicate employee ID: EMP_003' },
+  { row: 3, name: 'First3 Last3', personal: 'first3.last3@gmail.com', work: 'first3.last3@work.com', phone: '555-000-0003', id: 'EMP_003', reason: 'Duplicate employee ID: EMP_003' },
+  { row: 4, name: 'First4 Last4', personal: 'first4.last3@gmail.com', work: 'first4.last4@work.com', phone: '555-000-0004', id: 'EMP_004', reason: 'Duplicate employee ID: EMP_004' },
+  { row: 5, name: 'First4 Last4', personal: 'first4.last3@gmail.com', work: 'first4.last4@work.com', phone: '555-000-0004', id: 'EMP_004', reason: 'Duplicate employee ID: EMP_004' },
+];
+const ROSTER_PROBLEM_COLUMNS: DataTableColumn<typeof ROSTER_PROBLEM_ROWS[number]>[] = [
+  { key: 'flag', header: '', width: '48px', cell: row => <span title={row.reason}><Icon name="status-warn" /><span className="sr-only">{row.reason}</span></span> },
+  { key: 'row', header: 'Row #', width: '80px' },
+  { key: 'name', header: 'First and last name' },
+  { key: 'personal', header: 'Personal email' },
+  { key: 'work', header: 'Work email' },
+  { key: 'phone', header: 'Phone number' },
+  { key: 'id', header: 'Employee ID' },
+];
+type RosterImportPhase = 'upload' | 'processing' | 'results';
+interface RosterImportState { open: boolean; phase: RosterImportPhase; fileName: string; error: string; }
+
+function downloadTextFile(fileName: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function RosterImportModal({ state, onClose, onFileChange, onImport, onUploadAnother }: {
+  state: RosterImportState; onClose: () => void; onFileChange: (fileName: string) => void; onImport: () => void; onUploadAnother: () => void;
+}) {
+  const { phase, fileName, error } = state;
   const [files, setFiles] = useState<FileInputFile[]>([]);
-  const [phase, setPhase] = useState<'upload' | 'processing' | 'done'>('upload');
-  const [error, setError] = useState('');
-  const fileName = files[0]?.file.name ?? '';
-  const startImport = () => {
-    if (!fileName.toLowerCase().endsWith('.csv')) { setError('Invalid file. Please use the provided template.'); return; }
-    setError('');
-    setPhase('processing');
-    window.setTimeout(() => { setPhase('done'); onImported(fileName); }, 1500);
-  };
+  const results = phase === 'results';
+  const cards: [string, string][] = [
+    ['Rows processed', results ? String(ROSTER_RESULT.processed) : '--'],
+    ['Rows added', results ? String(ROSTER_RESULT.added) : '--'],
+    ['Employees matched and updated', results ? String(ROSTER_RESULT.matched) : '--'],
+    ['Needs further review', results ? String(ROSTER_RESULT.review) : '--'],
+  ];
+  const restart = () => { setFiles([]); onUploadAnother(); };
   return (
-    <Modal open onClose={onClose} title="Upload a CSV of employee records" size="medium" footer={
-      <Inline gap="small" justify="end">
-        <Button kind="secondary" onClick={onClose}>{phase === 'done' ? 'Close' : 'Cancel'}</Button>
-        {phase === 'upload' && <Button kind="primary" disabled={!files.length} onClick={startImport}>Import</Button>}
-      </Inline>
+    <Modal open={state.open} onClose={onClose} title={phase === 'upload' ? 'Import data from a spreadsheet' : 'Imported employee data'} size={phase === 'upload' ? 'large' : 'xlarge'} footer={
+      phase === 'upload' ? (
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" onClick={onClose}>Cancel</Button>
+          <Button kind="primary" disabled={!fileName || Boolean(error)} onClick={onImport}>Import Data</Button>
+        </Inline>
+      ) : (
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" disabled={phase === 'processing'} onClick={restart}>Upload another spreadsheet</Button>
+          <Button kind="primary" onClick={onClose}>Done</Button>
+        </Inline>
+      )
     }>
       {phase === 'upload' && (
-        <Stack gap="large">
-          <Text size="sm" color="secondary">Records in the CSV are matched to existing profiles in People Hub. New profiles are created when Docusign AI processes agreements for those employees.</Text>
-          <FileInput label="Employee records (.csv)" accept=".csv" value={files} onChange={(next) => { setFiles(next.slice(-1)); setError(''); }} error={error} />
+        <Stack gap="medium">
+          <Text size="sm" color="secondary">Import a spreadsheet of employee names, contact, and IDs. We&apos;ll map the columns and create records in bulk.</Text>
+          {error && <Banner kind="danger" closable={false}>{error}</Banner>}
+          {fileName && !error && <Banner kind="success" closable={false}>{`File uploaded: ${fileName}`}</Banner>}
+          <FileInput label="Drop files here to get started" description="Supported Formats: CSV" value={files}
+            onChange={next => { const picked = next.slice(-1); setFiles(picked); onFileChange(picked[0]?.file.name ?? ''); }} />
+          <Inline gap="small">
+            <Button kind="secondary" size="small" onClick={() => downloadTextFile('employee-records-template.csv', `${ROSTER_TEMPLATE_COLUMNS.join(',')}\n`)}>Download Template</Button>
+          </Inline>
+          <Text size="xs" color="secondary">{`Up to 10,000 employees per file. Columns: ${ROSTER_TEMPLATE_COLUMNS.join(', ')}.`}</Text>
         </Stack>
       )}
-      {phase === 'processing' && <Inline gap="small" align="center"><Spinner /><Text size="sm">{`Processing ${fileName}…`}</Text></Inline>}
-      {phase === 'done' && (
-        <Stack gap="small">
-          <Text weight="semibold">Import complete</Text>
-          <Text size="sm" color="secondary">{`${fileName} was uploaded. Matching profiles are updated now; other records appear as agreements are processed, which may take up to two days.`}</Text>
+      {phase !== 'upload' && (
+        <Stack gap="large">
+          <Inline gap="small" align="stretch">
+            {cards.map(([label, value]) => (
+              <Card key={label} style={{ flex: 1 }}><Card.Body><Stack gap="none"><Text size="xs" color="secondary">{label}</Text><Heading level={3}>{value}</Heading></Stack></Card.Body></Card>
+            ))}
+          </Inline>
+          {phase === 'processing' && <Inline gap="small" align="center"><Spinner /><Text size="sm">Importing and saving your employee data…</Text></Inline>}
+          {results && (
+            <Stack gap="small">
+              <Text weight="semibold">Rows that need further review</Text>
+              <DataTable columns={ROSTER_PROBLEM_COLUMNS} data={ROSTER_PROBLEM_ROWS} getRowKey={row => row.row} />
+            </Stack>
+          )}
         </Stack>
       )}
     </Modal>
   );
 }
 
-function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge, hub, onOpenHubSettings, onImportRoster }: PartiesPageProps) {
+function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge, hub, onOpenHubSettings, onImportRoster, onShowProfiles }: PartiesPageProps) {
   const isOrganizations = view === 'organizations';
-  const [importOpen, setImportOpen] = useState(false);
+  const [importState, setImportState] = useState<RosterImportState>({ open: false, phase: 'upload', fileName: '', error: '' });
+  const importOpenRef = useRef(false);
+  importOpenRef.current = importState.open;
   const peopleHubOff = !isOrganizations && !hub.enabled;
+  const peopleHubEmpty = !isOrganizations && hub.enabled && !hub.profilesVisible;
   const { toast } = useToast();
+  const openImport = () => setImportState({ open: true, phase: 'upload', fileName: '', error: '' });
+  const closeImport = () => setImportState(current => ({ ...current, open: false }));
+  const chooseImportFile = (fileName: string) => setImportState(current => ({ ...current, fileName, error: fileName && !fileName.toLowerCase().endsWith('.csv') ? 'Invalid file. Please use the provided template.' : '' }));
+  const startImport = () => {
+    const { fileName } = importState;
+    setImportState(current => ({ ...current, phase: 'processing' }));
+    window.setTimeout(() => {
+      setImportState(current => ({ ...current, phase: 'results' }));
+      onImportRoster({ fileName, ...ROSTER_RESULT });
+      if (!importOpenRef.current) {
+        toast({
+          kind: 'warning',
+          duration: 15000,
+          children: 'Your upload is complete with some issues.',
+          action: <Button kind="tertiary" size="small" onClick={() => setImportState(current => ({ ...current, open: true, phase: 'results' }))}>View Summary</Button>,
+        });
+      }
+    }, 2200);
+  };
+  const downloadRoster = () => downloadTextFile('people-roster.csv', ['employee_id,name,email,location', ...peopleData.map(person => [person.employeeId, person.name, person.emails[0] ?? '', person.location].map(value => `"${value}"`).join(','))].join('\n'));
   const forceEmpty = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('parties') === 'empty';
 
   const [loading, setLoading] = useState(true);
@@ -1983,7 +2061,16 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
             aiBadgeText="AI-Assisted"
             actions={
               <>
-                {!isOrganizations && <Button kind="secondary" size="small" disabled={!hub.enabled} onClick={() => setImportOpen(true)}>Upload a CSV</Button>}
+                {!isOrganizations && (
+                  <Dropdown variant="solid" align="end" items={[
+                    { label: 'Upload a CSV', description: hub.enabled ? undefined : 'Turn on Agreement Manager for HR to upload', disabled: !hub.enabled, onClick: openImport },
+                    { section: 'Add data from external sources' },
+                    { label: 'Connect an HR system', badge: 'New', disabled: !hub.enabled, onClick: openImport },
+                    ...(hub.roster ? [{ divider: true }, { label: 'Download roster', onClick: downloadRoster }] : []),
+                  ]}>
+                    <Button kind="secondary" size="small" startElement={<Icon name="plus" />} menuTrigger>Add</Button>
+                  </Dropdown>
+                )}
                 <IconButton icon="chart-bar" variant="tertiary" size="small" aria-label="Analytics" />
                 <Button kind="primary" size="small" onClick={onAskIris} startElement={<IrisIconInverse size={20} />} className="iris-ask-button">Ask Iris</Button>
               </>
@@ -2026,6 +2113,24 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
         >
           People Hub is turned off for this account. An admin can turn on automatic HR agreement processing to build people profiles from your HR agreements.
         </EmptyState>
+      ) : peopleHubEmpty && !loading ? (
+        <EmptyState
+          direction="column"
+          alignment="center"
+          image={<Icon name="building-person" />}
+          header={<EmptyState.Header text="No people yet" />}
+          callToAction={
+            <Stack gap="small" align="center">
+              <Inline gap="small" justify="center">
+                <Button kind="primary" onClick={openImport}>Upload a CSV</Button>
+                <Button kind="secondary" onClick={openImport}>Connect an HR system</Button>
+              </Inline>
+              <Link href="#view-profiles" onClick={(event) => { event.preventDefault(); onShowProfiles(); }}>View Profiles</Link>
+            </Stack>
+          }
+        >
+          Upload a CSV or connect an HR system so profiles are accurate and have no duplicates. Profiles build as Docusign AI processes your HR agreements, which may take up to two days.
+        </EmptyState>
       ) : forceEmpty && !loading ? (
         <EmptyState
           direction="column"
@@ -2040,7 +2145,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
       ) : (
         <DataTable {...tableProps} columns={personColumns} data={people} getRowKey={(row) => row.id} />
       )}
-      {importOpen && <RosterImportModal onClose={() => setImportOpen(false)} onImported={onImportRoster} />}
+      {!isOrganizations && <RosterImportModal state={importState} onClose={closeImport} onFileChange={chooseImportFile} onImport={startImport} onUploadAnother={openImport} />}
       {isOrganizations && mergeOpen && !mergeBlocker && (
         <MergeFlow type={view} records={selectedOrganizations} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />
       )}
@@ -4677,7 +4782,8 @@ function AdminSection({ title, description, children }: { title: string; descrip
 
 const ADMIN_ACCOUNT_ID = '48217603';
 
-interface PeopleHubState { enabled: boolean; roster: string | null; }
+interface RosterSummary { fileName: string; processed: number; added: number; matched: number; review: number; }
+interface PeopleHubState { enabled: boolean; roster: RosterSummary | null; profilesVisible: boolean; }
 
 function AiControlsSettings({ hub, onHubEnabledChange, onOpenPeopleHub }: {
   hub: PeopleHubState; onHubEnabledChange: (enabled: boolean) => void; onOpenPeopleHub: () => void;
@@ -4685,7 +4791,7 @@ function AiControlsSettings({ hub, onHubEnabledChange, onOpenPeopleHub }: {
   const [anonymizedData, setAnonymizedData] = useState(false);
   const [aiAssistant, setAiAssistant] = useState(true);
   return <Stack gap="large" style={{ maxWidth: 720 }}>
-    <Text size="sm" color="secondary">{`Manage AI-powered features for account ${ADMIN_ACCOUNT_ID}. These settings apply to every user in the account.`}</Text>
+    <Text size="sm" color="secondary">{`Manage AI-powered features for account ${ADMIN_ACCOUNT_ID}. These settings apply to every user in the account. `}<Link href="https://support.docusign.com" target="_blank" rel="noopener noreferrer">Learn more.</Link></Text>
     <AdminSection title="AI data controls" description="Manage how data is used for AI training. This helps us improve our products and solutions.">
       <Switch label="Allow my anonymized data to be used to improve AI-assisted experiences" checked={anonymizedData} onChange={setAnonymizedData} />
     </AdminSection>
@@ -4699,12 +4805,17 @@ function AiControlsSettings({ hub, onHubEnabledChange, onOpenPeopleHub }: {
           checked={hub.enabled}
           onChange={onHubEnabledChange}
         />
+        <Link href="https://apps.docusign.com/appcenter" target="_blank" rel="noopener noreferrer">Open the Docusign App Center</Link>
         {hub.enabled && <Inline gap="small" align="center" wrap>
           <Text size="sm" color="secondary">People Hub is on for this account.</Text>
           <Button kind="secondary" size="small" onClick={onOpenPeopleHub}>Go to People Hub</Button>
         </Inline>}
       </Stack>
     </AdminSection>
+    <Inline gap="small">
+      <Button kind="primary">Save</Button>
+      <Button kind="secondary">Cancel</Button>
+    </Inline>
   </Stack>;
 }
 
@@ -4915,7 +5026,7 @@ function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onN
   </>;
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════��══════════════════
    Footer
    ═══════════════════════════════════════ */
 
@@ -6341,8 +6452,14 @@ function PrototypeApp() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('completed');
   const [organizationsData, setOrganizationsData] = useState<Organization[]>(ORGANIZATIONS_DATA);
   const [peopleData, setPeopleData] = useState<Person[]>(PEOPLE_DATA);
-  const [peopleHub, setPeopleHub] = useState<PeopleHubState>({ enabled: false, roster: null });
-  const setPeopleHubEnabled = (enabled: boolean) => setPeopleHub(enabled ? { enabled, roster: peopleHub.roster } : { enabled: false, roster: null });
+  const [peopleHub, setPeopleHub] = useState<PeopleHubState>({ enabled: false, roster: null, profilesVisible: false });
+  const setPeopleHubEnabled = (enabled: boolean) => setPeopleHub(enabled ? { ...peopleHub, enabled } : { enabled: false, roster: null, profilesVisible: false });
+  const hasRoster = Boolean(peopleHub.roster);
+  useEffect(() => {
+    if (!hasRoster || peopleHub.profilesVisible) return;
+    const timer = window.setTimeout(() => setPeopleHub(current => ({ ...current, profilesVisible: true })), 6000);
+    return () => window.clearTimeout(timer);
+  }, [hasRoster, peopleHub.profilesVisible]);
 
   const mergePartyRecords = (type: PartiesView, merged: Organization | Person, removedIds: string[]) => {
     if (type === 'organizations') {
@@ -6873,7 +6990,7 @@ function PrototypeApp() {
         if (match) return current.map(person => person.id === match.id ? { ...person, verified: true } : person);
         return [{ id: `i9-${Date.now()}`, name: session.recipientName, employeeId: '', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: '', emails: [session.recipientEmail], phone: '', hireDate: session.startDate, verified: true }, ...current];
       });
-      setPeopleHub(current => ({ enabled: true, roster: current.roster }));
+      setPeopleHub(current => ({ enabled: true, roster: current.roster, profilesVisible: true }));
       handleTabClick('agreements');
       setSidebarView('parties-people');
     }}
@@ -6894,6 +7011,7 @@ function PrototypeApp() {
       hub={peopleHub}
       onOpenHubSettings={() => { handleTabClick('admin'); setAdminView('ai-controls'); }}
       onImportRoster={roster => setPeopleHub(current => ({ ...current, roster }))}
+      onShowProfiles={() => setPeopleHub(current => ({ ...current, profilesVisible: true }))}
     />
   ) : (
     <AgreementTableView
