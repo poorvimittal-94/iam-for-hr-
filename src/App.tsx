@@ -1067,8 +1067,8 @@ function PersonDetails({ person, onViewVerifications }: { person: Person; onView
   ].filter(Boolean) as string[];
 
   return (
-    <Inline gap="large" align="start" style={{ flexWrap: 'wrap' }}>
-      <Stack gap="large" style={{ flex: '1 1 calc(var(--ink-spacing-300) * 14)', minWidth: 0, maxWidth: 'calc(var(--ink-spacing-300) * 22)' }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch', width: '100%' }}>
+      <Stack gap="large" style={{ flex: '1 1 calc(var(--ink-spacing-300) * 15)', minWidth: 0, maxWidth: 'calc(var(--ink-spacing-300) * 18)', paddingBlock: 'var(--ink-spacing-300)', paddingInlineEnd: 'var(--ink-spacing-400)', borderInlineEnd: '1px solid var(--ink-border-subtle, var(--ink-neutral-20, rgba(19,0,50,0.1)))' }}>
         <Stack gap="xs">
           <Text size="xs" weight="semibold">NAME</Text>
           <Text>{person.name}</Text>
@@ -1104,7 +1104,7 @@ function PersonDetails({ person, onViewVerifications }: { person: Person; onView
           </Stack>
         )}
       </Stack>
-      <div style={{ flex: '2 1 calc(var(--ink-spacing-300) * 20)', minWidth: 0 }}>
+      <div style={{ flex: '3 1 calc(var(--ink-spacing-300) * 20)', minWidth: 0, paddingBlock: 'var(--ink-spacing-300)', paddingInlineStart: 'var(--ink-spacing-400)' }}>
         <Accordion
           bordered
           allowMultiple
@@ -1125,7 +1125,7 @@ function PersonDetails({ person, onViewVerifications }: { person: Person; onView
           ]}
         />
       </div>
-    </Inline>
+    </div>
   );
 }
 
@@ -1176,7 +1176,7 @@ function PersonProfile({ person, onBack }: { person: Person; onBack: () => void 
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [starred, setStarred] = useState(false);
   return (
-    <Container style={{ paddingBlock: 'var(--ink-spacing-400)' }}>
+    <Container size="full" style={{ paddingBlock: 'var(--ink-spacing-400)' }}>
       <Stack gap="medium">
         <Breadcrumb items={[{ label: 'People', href: '#' }, { label: person.name }]} onItemClick={(_item: unknown, index: number) => { if (index === 0) onBack(); }} />
         <Inline justify="between" align="center" gap="medium" style={{ flexWrap: 'wrap' }}>
