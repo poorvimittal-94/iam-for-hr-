@@ -2826,7 +2826,7 @@ function OneNotaryStatusRow({ state, children }: { state: 'done' | 'current' | '
   </li>;
 }
 
-function I9OneNotary({ session, onExit }: { session: I9Session; onExit: () => void }) {
+function I9OneNotary({ session, onExit, onComplete }: { session: I9Session; onExit: () => void; onComplete: () => void }) {
   const [stage, setStage] = useState<OneNotaryStage>('eligibility');
   const [agreed, setAgreed] = useState({ docusign: true, onenotary: true });
   const [waitNotice, setWaitNotice] = useState(false);
@@ -2881,6 +2881,10 @@ function I9OneNotary({ session, onExit }: { session: I9Session; onExit: () => vo
           <figcaption><span><strong>Signer</strong> {signerName}</span><Inline gap="xs"><Icon name="video-camera" size="small" /><Icon name="microphone" size="small" /></Inline></figcaption>
           <img src="/onenotary-signer.png" alt={`Signer ${signerName} on video`} />
         </figure>
+        <div className="on-session-actions">
+          <Button kind="primary" onClick={onComplete}>Session complete</Button>
+          <Text size="xs" color="secondary">Select this once the documents are verified. The I-9 for {signerName} will be recorded as complete.</Text>
+        </div>
       </aside>
     </div>
   </div>;
@@ -3109,7 +3113,8 @@ function I9Section2Journey({ session, setSession, onExit, onFinish }: {
   </JourneyShell>;
 }
 
-function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate }: {
+function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate, onI9Complete }: {
+  onI9Complete: (session: I9Session) => void;
   view: TemplatesSidebarView; onNavigate: (view: TemplatesSidebarView) => void; search: string; onSearchChange: (value: string) => void;
   items: TemplateItem[]; onItemsChange: React.Dispatch<React.SetStateAction<TemplateItem[]>>; editor: TemplateEditorState | null;
   onEditorChange: (editor: TemplateEditorState | null) => void; onUseTemplate: (item: TemplateItem) => void;
@@ -3235,6 +3240,11 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
     {i9Phase === 'onenotary' && i9Session && <I9OneNotary session={i9Session} onExit={() => {
       setNotice(`${i9Session.recipientName} completed identity verification for Form I-9.`);
       setI9Session(null);
+      setI9Phase('closed');
+    }} onComplete={() => {
+      onI9Complete(i9Session);
+      setI9Session(null);
+      setI9Pending(null);
       setI9Phase('closed');
     }} />}
     {i9Phase === 'section2' && i9Pending && <I9Section2Journey session={i9Pending} setSession={setI9Pending} onExit={() => setI9Phase('closed')} onFinish={completed => {
@@ -6688,6 +6698,17 @@ function PrototypeApp() {
     view={templatesSidebarView} onNavigate={navigateTemplateView} search={search} onSearchChange={setSearch}
     items={templateItems} onItemsChange={setTemplateItems} editor={templateEditor} onEditorChange={setTemplateEditor}
     onUseTemplate={useLibraryTemplate}
+    onI9Complete={session => {
+      const email = session.recipientEmail.toLowerCase();
+      setPeopleData(current => {
+        const match = current.find(person => person.emails.some(item => item.toLowerCase() === email) || person.name.toLowerCase() === session.recipientName.toLowerCase());
+        if (match) return current.map(person => person.id === match.id ? { ...person, verified: true } : person);
+        return [{ id: `i9-${Date.now()}`, name: session.recipientName, employeeId: '', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: '', emails: [session.recipientEmail], phone: '', hireDate: session.startDate, verified: true }, ...current];
+      });
+      setPeopleHub(current => ({ enabled: true, roster: current.roster }));
+      handleTabClick('agreements');
+      setSidebarView('parties-people');
+    }}
   />;
 
   /* ── Insights content ── */
