@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useId, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import powerFormsEmptyArt from '@/assets/powerforms-empty.svg';
+import idLicenseArt from '@/assets/id-license.png';
+import idSsnArt from '@/assets/id-ssn.png';
 import {
   DocuSignShell,
   AgreementTableView,
@@ -254,7 +256,7 @@ type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | '
 type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ═════════════════�����══════����══════════════
+/* ═════════════════�������══════����══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -924,13 +926,293 @@ const organizationColumns: DataTableColumn<Organization>[] = [
   { key: 'totalAgreements', header: 'Total agreements', sortable: true, cell: (row) => <Text size="sm">{row.totalAgreements}</Text> },
 ];
 
-const personColumns: DataTableColumn<Person>[] = [
+const I9_AUTHORISED_SUMMARY = 'I-9 Employment authorised by Anna Oh via On demand (OneNotary) on 10/2/2025 6:36:31 am PDT';
+
+function I9Indicator() {
+  return (
+    <Tooltip text={I9_AUTHORISED_SUMMARY} location="above" alignment="start">
+      <span tabIndex={0} role="img" aria-label={I9_AUTHORISED_SUMMARY} style={{ display: 'inline-flex' }}>
+        <Icon name="shield-check" size="small" />
+      </span>
+    </Tooltip>
+  );
+}
+
+function I9EvidenceModal({ person, onClose }: { person: Person; onClose: () => void }) {
+  const [backShown, setBackShown] = useState<Record<string, boolean>>({});
+  const documents = [
+    { id: 'license', title: "Driver's license or ID card issued by a State", list: 'List B', art: idLicenseArt, alt: 'California driver license, front' },
+    { id: 'ssn', title: 'U.S. Social Security Card', list: 'List C', art: idSsnArt, alt: 'Social Security card' },
+  ];
+  return (
+    <Modal open size="large" title="ID Evidence" onClose={onClose}>
+      <Stack gap="large">
+        <Inline gap="medium" align="start" style={{ flexWrap: 'nowrap' }}>
+          <Icon name="status-check" size="medium" />
+          <Stack gap="small">
+            <Heading level={3}>{`Employment authorized for ${person.name}`}</Heading>
+            <Text size="sm" color="secondary">ID verification session completed by OneNotary on 10/2/2025 6:36:31 am PDT</Text>
+          </Stack>
+        </Inline>
+        <Stack gap="small">
+          <Text size="sm" weight="semibold">E-Verify status</Text>
+          <Inline gap="xs"><Badge kind="success">Employment authorized</Badge></Inline>
+          <Text size="sm" color="secondary">Case #324234523</Text>
+        </Stack>
+        <Stack gap="small">
+          <Text size="sm" weight="semibold">Type of documents</Text>
+          <ol style={{ margin: 0, paddingInlineStart: 'var(--ink-spacing-300)' }}>
+            {documents.map((d) => (
+              <li key={d.id}><Text size="sm">{d.title} <Text as="span" size="sm" color="secondary">({d.list})</Text></Text></li>
+            ))}
+          </ol>
+        </Stack>
+        <Divider />
+        {documents.map((d) => (
+          <Stack key={d.id} gap="small">
+            <img
+              src={d.art}
+              alt={backShown[d.id] ? `${d.alt}, back view requested` : d.alt}
+              style={{ width: '100%', display: 'block', borderRadius: 'var(--ink-spacing-100)' }}
+            />
+            <Inline gap="none">
+              <Button kind="secondary" size="small" onClick={() => setBackShown((c) => ({ ...c, [d.id]: !c[d.id] }))}>View Back</Button>
+            </Inline>
+          </Stack>
+        ))}
+        <Banner kind="information" closable={false}>
+          {`This identity verification was done on ${person.name} (${person.emails[person.emails.length - 1]}) for Envelope ID F77923AF4D0940E196CEAD4FD6B7ADFB.`}
+        </Banner>
+      </Stack>
+    </Modal>
+  );
+}
+
+type DocStatus = 'found' | 'not-found' | 'none';
+interface PersonDoc {
+  id: string;
+  name: string;
+  type: string;
+  source: string;
+  clawbacks: DocStatus;
+  separation: DocStatus;
+  workForHire: DocStatus;
+  isI9?: boolean;
+}
+
+const I9_DOC: PersonDoc = { id: 'i9', name: 'I-9 Employee Verification', type: 'I-9', source: 'One Notary', clawbacks: 'none', separation: 'none', workForHire: 'none', isI9: true };
+
+const DALE_DOCS: PersonDoc[] = [
+  I9_DOC,
+  { id: 'passport', name: 'Passport Scan', type: 'Supplemental Document', source: 'One Notary', clawbacks: 'none', separation: 'none', workForHire: 'none' },
+  { id: 'offer', name: 'Offer Letter_Dale Simmons', type: 'Offer Letter', source: 'Greenhouse', clawbacks: 'found', separation: 'found', workForHire: 'found' },
+  { id: 'nda', name: 'Non-Disclosure Agreement_Dale Simmons', type: 'NDA', source: 'Greenhouse', clawbacks: 'not-found', separation: 'not-found', workForHire: 'not-found' },
+  { id: 'wage', name: 'California Wage Theft Provision Notice', type: 'Policy', source: 'Greenhouse', clawbacks: 'not-found', separation: 'not-found', workForHire: 'not-found' },
+  { id: 'ciianca', name: 'Confidential Information, Invention Assignment', type: 'CIIANCA', source: 'Greenhouse', clawbacks: 'not-found', separation: 'not-found', workForHire: 'not-found' },
+];
+
+const documentsFor = (person: Person): PersonDoc[] => {
+  if (person.name === 'Dale Simmons') return DALE_DOCS;
+  return person.verified ? [I9_DOC] : [];
+};
+
+function DocStatusCell({ status }: { status: DocStatus }) {
+  if (status === 'none') return <Text size="sm" color="secondary">-</Text>;
+  const found = status === 'found';
+  return (
+    <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap', color: found ? 'var(--ink-green-100)' : 'var(--ink-orange-100)' }}>
+      <Icon name={found ? 'check' : 'status-error'} size="small" />
+      <Text size="sm" style={{ color: 'inherit' }}>{found ? 'Found' : 'Not found'}</Text>
+    </Inline>
+  );
+}
+
+function ProfileField({ label, value, source }: { label: string; value: string; source?: string }) {
+  return (
+    <Inline justify="between" align="end" gap="medium" style={{ flexWrap: 'nowrap' }}>
+      <Stack gap="xs">
+        <Text size="xs" weight="semibold">{label.toUpperCase()}</Text>
+        <Text>{value}</Text>
+      </Stack>
+      {source && (
+        <Text size="sm" color="secondary">Source: <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => event.preventDefault()}>{source}</Link></Text>
+      )}
+    </Inline>
+  );
+}
+
+function PersonDetails({ person, onViewVerifications }: { person: Person; onViewVerifications: () => void }) {
+  const verifications = [
+    { id: 'clear', label: 'Clear', ok: true },
+    { id: 'i9', label: 'I-9 Employment Verification', ok: person.verified },
+  ];
+  const workEmail = person.emails.find((email) => !/@(gmail|yahoo|outlook)\./.test(email));
+  const personalEmail = person.emails.find((email) => /@(gmail|yahoo|outlook)\./.test(email));
+  const contact = [
+    person.phone && { label: 'Phone', value: person.phone },
+    workEmail && { label: 'Work email', value: workEmail },
+    personalEmail && { label: 'Personal email', value: personalEmail },
+  ].filter(Boolean) as { label: string; value: string }[];
+  const employee = [
+    person.applicantId && { label: 'Applicant ID', value: person.applicantId, source: 'Greenhouse' },
+    person.employeeId && { label: 'Employee ID', value: person.employeeId, source: 'Workday' },
+    person.employmentType && { label: 'Employment type', value: person.employmentType },
+    person.status && { label: 'Status', value: person.status },
+    person.location && { label: 'Location', value: person.location },
+    person.hireDate && { label: 'Hire date', value: person.hireDate },
+  ].filter(Boolean) as { label: string; value: string; source?: string }[];
+  const sources = [
+    person.applicantId && 'Greenhouse',
+    person.employeeId && 'Workday',
+  ].filter(Boolean) as string[];
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch', width: '100%' }}>
+      <Stack gap="large" style={{ flex: '1 1 calc(var(--ink-spacing-300) * 15)', minWidth: 0, maxWidth: 'calc(var(--ink-spacing-300) * 18)', paddingBlock: 'var(--ink-spacing-300)', paddingInlineEnd: 'var(--ink-spacing-400)', borderInlineEnd: '1px solid var(--ink-border-subtle, var(--ink-neutral-20, rgba(19,0,50,0.1)))' }}>
+        <Stack gap="xs">
+          <Text size="xs" weight="semibold">NAME</Text>
+          <Text>{person.name}</Text>
+        </Stack>
+        <Stack gap="small">
+          <Text size="xs" weight="semibold">VERIFICATIONS</Text>
+          {verifications.map((v) => (
+            <Inline key={v.id} gap="small" align="center" justify="between" style={{ flexWrap: 'nowrap' }}>
+              <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
+                <span style={{ display: 'inline-flex', color: v.ok ? 'var(--ink-green-100)' : 'inherit' }}>
+                  <Icon name={v.ok ? 'status-check' : 'shield'} size="small" />
+                </span>
+                <Text>{v.label}</Text>
+              </Inline>
+              {v.ok && <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); onViewVerifications(); }}>View Verifications</Link>}
+            </Inline>
+          ))}
+        </Stack>
+        {sources.length > 0 && (
+          <Stack gap="small">
+            <Text size="xs" weight="semibold">DATA SOURCES</Text>
+            {sources.map((source) => (
+              <Card key={source}>
+                <Inline justify="between" align="center" gap="small" style={{ flexWrap: 'nowrap' }}>
+                  <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
+                    <Avatar size="small" initials={initialsOf(source)} />
+                    <Text weight="semibold">{source}</Text>
+                  </Inline>
+                  <Text size="sm" color="secondary">(Synced 2 hours ago)</Text>
+                </Inline>
+              </Card>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+      <div style={{ flex: '3 1 calc(var(--ink-spacing-300) * 20)', minWidth: 0, paddingBlock: 'var(--ink-spacing-300)', paddingInlineStart: 'var(--ink-spacing-400)' }}>
+        <Accordion
+          bordered
+          allowMultiple
+          defaultOpenItems={['contact', 'employee']}
+          items={[
+            {
+              id: 'contact',
+              title: 'Contact information',
+              metadata: String(contact.length),
+              content: <Stack gap="medium">{contact.map((f) => <ProfileField key={f.label} {...f} />)}</Stack>,
+            },
+            {
+              id: 'employee',
+              title: 'Employee details',
+              metadata: String(employee.length),
+              content: <Stack gap="medium">{employee.map((f) => <ProfileField key={f.label} {...f} />)}</Stack>,
+            },
+          ]}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PersonDocuments({ person, onOpenI9 }: { person: Person; onOpenI9: () => void }) {
+  const docs = documentsFor(person);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState(PARTY_FILTER_ALL);
+  const [sourceFilter, setSourceFilter] = useState(PARTY_FILTER_ALL);
+  const visible = docs.filter((d) =>
+    d.name.toLowerCase().includes(search.trim().toLowerCase()) &&
+    (typeFilter === PARTY_FILTER_ALL || d.type === typeFilter) &&
+    (sourceFilter === PARTY_FILTER_ALL || d.source === sourceFilter));
+  const columns: DataTableColumn<PersonDoc>[] = [
+    {
+      key: 'name', header: 'Name', sortable: true, width: '34%',
+      cell: (row) => (
+        <Stack gap="none">
+          {row.isI9
+            ? <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); onOpenI9(); }}>{row.name}</Link>
+            : <Text size="sm" weight="semibold">{row.name}</Text>}
+          <Text size="xs" color="secondary">{`Source: ${row.source}`}</Text>
+        </Stack>
+      ),
+    },
+    { key: 'type', header: 'Type', sortable: true, cell: (row) => <Text size="sm">{row.type}</Text> },
+    { key: 'clawbacks', header: 'Clawbacks', sortable: true, cell: (row) => <DocStatusCell status={row.clawbacks} /> },
+    { key: 'separation', header: 'Separation', sortable: true, cell: (row) => <DocStatusCell status={row.separation} /> },
+    { key: 'workForHire', header: 'Work for hire', sortable: true, cell: (row) => <DocStatusCell status={row.workForHire} /> },
+  ];
+  return (
+    <Stack gap="medium">
+      <FilterBar
+        search={{ value: search, onChange: setSearch, placeholder: 'Search Documents' }}
+        filters={(
+          <Inline gap="small">
+            <PartyFilterMenu label="Type" value={typeFilter} options={[...new Set(docs.map((d) => d.type))]} onChange={setTypeFilter} />
+            <PartyFilterMenu label="Source" value={sourceFilter} options={[...new Set(docs.map((d) => d.source))]} onChange={setSourceFilter} />
+          </Inline>
+        )}
+      />
+      <DataTable columns={columns} data={visible} getRowKey={(row) => row.id} emptyMessage="No documents found" />
+    </Stack>
+  );
+}
+
+function PersonProfile({ person, onBack }: { person: Person; onBack: () => void }) {
+  const [tab, setTab] = useState('documents');
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [starred, setStarred] = useState(false);
+  return (
+    <Container size="full" style={{ paddingBlock: 'var(--ink-spacing-400)' }}>
+      <Stack gap="medium">
+        <Breadcrumb items={[{ label: 'People', href: '#' }, { label: person.name }]} onItemClick={(_item: unknown, index: number) => { if (index === 0) onBack(); }} />
+        <Inline justify="between" align="center" gap="medium" style={{ flexWrap: 'wrap' }}>
+          <Inline gap="small" align="center">
+            <Heading level={1}>{person.name}</Heading>
+            {person.verified && <I9Indicator />}
+            <AIBadge infoContent={false} />
+          </Inline>
+          <Inline gap="small" align="center">
+            <IconButton icon={starred ? 'star-filled' : 'star'} variant="tertiary" aria-label={starred ? `Remove ${person.name} from favorites` : `Add ${person.name} to favorites`} aria-pressed={starred} onClick={() => setStarred((value) => !value)} />
+            <Button kind="secondary" startElement={<Icon name="pencil" />}>Edit Details</Button>
+            <Button kind="secondary" startElement={<Icon name="upload" />}>Upload</Button>
+          </Inline>
+        </Inline>
+        <Tabs
+          aria-label="Person sections"
+          value={tab}
+          onChange={setTab}
+          tabs={[{ id: 'documents', label: 'Documents' }, { id: 'details', label: 'Details' }, { id: 'clauses', label: 'Clauses' }]}
+        />
+        {tab === 'details' && <PersonDetails person={person} onViewVerifications={() => setEvidenceOpen(true)} />}
+        {tab === 'documents' && <PersonDocuments person={person} onOpenI9={() => setEvidenceOpen(true)} />}
+        {tab === 'clauses' && <Text color="secondary">Nothing to show here in this prototype.</Text>}
+      </Stack>
+      {evidenceOpen && <I9EvidenceModal person={person} onClose={() => setEvidenceOpen(false)} />}
+    </Container>
+  );
+}
+
+const makePersonColumns = (onOpen: (person: Person) => void): DataTableColumn<Person>[] => [
   {
     key: 'name', header: 'Name', sortable: true, width: '24%',
     cell: (row) => (
       <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
-        <Text size="sm" weight="semibold">{row.name}</Text>
-        {row.verified && <Icon name="shield-check" size="small" aria-label="Verified" />}
+        <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); onOpen(row); }}>{row.name}</Link>
+        {row.verified && <I9Indicator />}
       </Inline>
     ),
   },
@@ -1536,11 +1818,129 @@ interface PartiesPageProps {
   organizationsData: Organization[];
   peopleData: Person[];
   onMerge: (type: PartiesView, merged: Organization | Person, removedIds: string[]) => void;
+  hub: PeopleHubState;
+  onOpenHubSettings: () => void;
+  onImportRoster: (roster: RosterSummary) => void;
+  onShowProfiles: () => void;
 }
 
-function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge }: PartiesPageProps) {
+const ROSTER_TEMPLATE_COLUMNS = ['employee_id', 'personal_email', 'work_email', 'first_name', 'last_name', 'phone'];
+const ROSTER_RESULT = { processed: 6, added: 3, matched: 1, review: 4 };
+const ROSTER_PROBLEM_ROWS = [
+  { row: 2, name: 'First3 Last3', personal: 'first3.last3@gmail.com', work: 'first3.last3@work.com', phone: '555-000-0003', id: 'EMP_003', reason: 'Duplicate employee ID: EMP_003' },
+  { row: 3, name: 'First3 Last3', personal: 'first3.last3@gmail.com', work: 'first3.last3@work.com', phone: '555-000-0003', id: 'EMP_003', reason: 'Duplicate employee ID: EMP_003' },
+  { row: 4, name: 'First4 Last4', personal: 'first4.last3@gmail.com', work: 'first4.last4@work.com', phone: '555-000-0004', id: 'EMP_004', reason: 'Duplicate employee ID: EMP_004' },
+  { row: 5, name: 'First4 Last4', personal: 'first4.last3@gmail.com', work: 'first4.last4@work.com', phone: '555-000-0004', id: 'EMP_004', reason: 'Duplicate employee ID: EMP_004' },
+];
+const ROSTER_PROBLEM_COLUMNS: DataTableColumn<typeof ROSTER_PROBLEM_ROWS[number]>[] = [
+  { key: 'flag', header: '', width: '48px', cell: row => <span title={row.reason}><Icon name="status-warn" /><span className="sr-only">{row.reason}</span></span> },
+  { key: 'row', header: 'Row #', width: '80px' },
+  { key: 'name', header: 'First and last name' },
+  { key: 'personal', header: 'Personal email' },
+  { key: 'work', header: 'Work email' },
+  { key: 'phone', header: 'Phone number' },
+  { key: 'id', header: 'Employee ID' },
+];
+type RosterImportPhase = 'upload' | 'processing' | 'results';
+interface RosterImportState { open: boolean; phase: RosterImportPhase; fileName: string; error: string; }
+
+function downloadTextFile(fileName: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function RosterImportModal({ state, onClose, onFileChange, onImport, onUploadAnother }: {
+  state: RosterImportState; onClose: () => void; onFileChange: (fileName: string) => void; onImport: () => void; onUploadAnother: () => void;
+}) {
+  const { phase, fileName, error } = state;
+  const [files, setFiles] = useState<FileInputFile[]>([]);
+  const results = phase === 'results';
+  const cards: [string, string][] = [
+    ['Rows processed', results ? String(ROSTER_RESULT.processed) : '--'],
+    ['Rows added', results ? String(ROSTER_RESULT.added) : '--'],
+    ['Employees matched and updated', results ? String(ROSTER_RESULT.matched) : '--'],
+    ['Needs further review', results ? String(ROSTER_RESULT.review) : '--'],
+  ];
+  const restart = () => { setFiles([]); onUploadAnother(); };
+  return (
+    <Modal open={state.open} onClose={onClose} title={phase === 'upload' ? 'Import data from a spreadsheet' : 'Imported employee data'} size={phase === 'upload' ? 'large' : 'xlarge'} footer={
+      phase === 'upload' ? (
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" onClick={onClose}>Cancel</Button>
+          <Button kind="primary" disabled={!fileName || Boolean(error)} onClick={onImport}>Import Data</Button>
+        </Inline>
+      ) : (
+        <Inline gap="small" justify="end">
+          <Button kind="secondary" disabled={phase === 'processing'} onClick={restart}>Upload another spreadsheet</Button>
+          <Button kind="primary" onClick={onClose}>Done</Button>
+        </Inline>
+      )
+    }>
+      {phase === 'upload' && (
+        <Stack gap="medium">
+          <Text size="sm" color="secondary">Import a spreadsheet of employee names, contact, and IDs. We&apos;ll map the columns and create records in bulk.</Text>
+          {error && <Banner kind="danger" closable={false}>{error}</Banner>}
+          {fileName && !error && <Banner kind="success" closable={false}>{`File uploaded: ${fileName}`}</Banner>}
+          <FileInput label="Drop files here to get started" description="Supported Formats: CSV" value={files}
+            onChange={next => { const picked = next.slice(-1); setFiles(picked); onFileChange(picked[0]?.file.name ?? ''); }} />
+          <Inline gap="small">
+            <Button kind="secondary" size="small" onClick={() => downloadTextFile('employee-records-template.csv', `${ROSTER_TEMPLATE_COLUMNS.join(',')}\n`)}>Download Template</Button>
+          </Inline>
+          <Text size="xs" color="secondary">{`Up to 10,000 employees per file. Columns: ${ROSTER_TEMPLATE_COLUMNS.join(', ')}.`}</Text>
+        </Stack>
+      )}
+      {phase !== 'upload' && (
+        <Stack gap="large">
+          <Inline gap="small" align="stretch">
+            {cards.map(([label, value]) => (
+              <Card key={label} style={{ flex: 1 }}><Card.Body><Stack gap="none"><Text size="xs" color="secondary">{label}</Text><Heading level={3}>{value}</Heading></Stack></Card.Body></Card>
+            ))}
+          </Inline>
+          {phase === 'processing' && <Inline gap="small" align="center"><Spinner /><Text size="sm">Importing and saving your employee data…</Text></Inline>}
+          {results && (
+            <Stack gap="small">
+              <Text weight="semibold">Rows that need further review</Text>
+              <DataTable columns={ROSTER_PROBLEM_COLUMNS} data={ROSTER_PROBLEM_ROWS} getRowKey={row => row.row} />
+            </Stack>
+          )}
+        </Stack>
+      )}
+    </Modal>
+  );
+}
+
+function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, onMerge, hub, onOpenHubSettings, onImportRoster, onShowProfiles }: PartiesPageProps) {
   const isOrganizations = view === 'organizations';
+  const [importState, setImportState] = useState<RosterImportState>({ open: false, phase: 'upload', fileName: '', error: '' });
+  const importOpenRef = useRef(false);
+  importOpenRef.current = importState.open;
+  const peopleHubOff = !isOrganizations && !hub.enabled;
+  const peopleHubEmpty = !isOrganizations && hub.enabled && !hub.profilesVisible;
   const { toast } = useToast();
+  const openImport = () => setImportState({ open: true, phase: 'upload', fileName: '', error: '' });
+  const closeImport = () => setImportState(current => ({ ...current, open: false }));
+  const chooseImportFile = (fileName: string) => setImportState(current => ({ ...current, fileName, error: fileName && !fileName.toLowerCase().endsWith('.csv') ? 'Invalid file. Please use the provided template.' : '' }));
+  const startImport = () => {
+    const { fileName } = importState;
+    setImportState(current => ({ ...current, phase: 'processing' }));
+    window.setTimeout(() => {
+      setImportState(current => ({ ...current, phase: 'results' }));
+      onImportRoster({ fileName, ...ROSTER_RESULT });
+      if (!importOpenRef.current) {
+        toast({
+          kind: 'warning',
+          duration: 15000,
+          children: 'Your upload is complete with some issues.',
+          action: <Button kind="tertiary" size="small" onClick={() => setImportState(current => ({ ...current, open: true, phase: 'results' }))}>View Summary</Button>,
+        });
+      }
+    }, 2200);
+  };
+  const downloadRoster = () => downloadTextFile('people-roster.csv', ['employee_id,name,email,location', ...peopleData.map(person => [person.employeeId, person.name, person.emails[0] ?? '', person.location].map(value => `"${value}"`).join(','))].join('\n'));
   const forceEmpty = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('parties') === 'empty';
 
   const [loading, setLoading] = useState(true);
@@ -1553,6 +1953,8 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ column?: string; direction: 'ascending' | 'descending' | null }>({ direction: null });
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const personColumns = useMemo(() => makePersonColumns((person) => setProfileId(person.id)), []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setLoading(false), 500);
@@ -1645,6 +2047,9 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
     pagination: { page: 1, pageSize: 25 as const, totalItems: rowCount, onPageChange: () => {}, onPageSizeChange: () => {}, showInfo: true },
   };
 
+  const openedPerson = !isOrganizations ? peopleData.find((p) => p.id === profileId) : undefined;
+  if (openedPerson) return <PersonProfile person={openedPerson} onBack={() => setProfileId(null)} />;
+
   return (
     <AgreementTableView
       paddingVariant="default"
@@ -1656,13 +2061,23 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
             aiBadgeText="AI-Assisted"
             actions={
               <>
+                {!isOrganizations && (
+                  <Dropdown variant="solid" align="end" items={[
+                    { label: 'Upload a CSV', description: hub.enabled ? undefined : 'Turn on Agreement Manager for HR to upload', disabled: !hub.enabled, onClick: openImport },
+                    { section: 'Add data from external sources' },
+                    { label: 'Connect an HR system', badge: 'New', disabled: !hub.enabled, onClick: openImport },
+                    ...(hub.roster ? [{ divider: true }, { label: 'Download roster', onClick: downloadRoster }] : []),
+                  ]}>
+                    <Button kind="secondary" size="small" startElement={<Icon name="plus" />} menuTrigger>Add</Button>
+                  </Dropdown>
+                )}
                 <IconButton icon="chart-bar" variant="tertiary" size="small" aria-label="Analytics" />
                 <Button kind="primary" size="small" onClick={onAskIris} startElement={<IrisIconInverse size={20} />} className="iris-ask-button">Ask Iris</Button>
               </>
             }
           />
           {isOrganizations && <Text size="sm" color="secondary">Companies you have agreements with, including your own entities.</Text>}
-          {!isOrganizations && bannerOpen && (
+          {!isOrganizations && hub.enabled && bannerOpen && (
             <Banner kind="promo" customIcon={<IrisIcon size={20} />} onClose={() => setBannerOpen(false)}>
               {'You have '}<strong>48 parties</strong>{' with similar names. We suggest merging these parties for more accurate reporting. '}
               <Link kind="subtle" href="#review-merge" onClick={(event) => { event.preventDefault(); setSuggestedOpen(true); }}>Review and Merge</Link>
@@ -1688,7 +2103,35 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
         />
       }
     >
-      {forceEmpty && !loading ? (
+      {peopleHubOff && !loading ? (
+        <EmptyState
+          direction="column"
+          alignment="center"
+          image={<Icon name="building-person" />}
+          header={<EmptyState.Header text="No people yet" />}
+          callToAction={<Button kind="primary" onClick={onOpenHubSettings}>Turn On Agreement Manager for HR</Button>}
+        >
+          People Hub is turned off for this account. An admin can turn on automatic HR agreement processing to build people profiles from your HR agreements.
+        </EmptyState>
+      ) : peopleHubEmpty && !loading ? (
+        <EmptyState
+          direction="column"
+          alignment="center"
+          image={<Icon name="building-person" />}
+          header={<EmptyState.Header text="No people yet" />}
+          callToAction={
+            <Stack gap="small" align="center">
+              <Inline gap="small" justify="center">
+                <Button kind="primary" onClick={openImport}>Upload a CSV</Button>
+                <Button kind="secondary" onClick={openImport}>Connect an HR system</Button>
+              </Inline>
+              <Link href="#view-profiles" onClick={(event) => { event.preventDefault(); onShowProfiles(); }}>View Profiles</Link>
+            </Stack>
+          }
+        >
+          Upload a CSV or connect an HR system so profiles are accurate and have no duplicates. Profiles build as Docusign AI processes your HR agreements, which may take up to two days.
+        </EmptyState>
+      ) : forceEmpty && !loading ? (
         <EmptyState
           direction="column"
           alignment="center"
@@ -1702,6 +2145,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
       ) : (
         <DataTable {...tableProps} columns={personColumns} data={people} getRowKey={(row) => row.id} />
       )}
+      {!isOrganizations && <RosterImportModal state={importState} onClose={closeImport} onFileChange={chooseImportFile} onImport={startImport} onUploadAnother={openImport} />}
       {isOrganizations && mergeOpen && !mergeBlocker && (
         <MergeFlow type={view} records={selectedOrganizations} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />
       )}
@@ -1730,7 +2174,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
 
 /* ═══════════════════════════════════════
    Requests Data (matches real DocuSign)
-   ════════════════════════════���═��═��══════ */
+   ════════════════════════════�����═��═��══════ */
 
 interface RequestItem {
   id: string;
@@ -1876,7 +2320,7 @@ const workspaceColumns: DataTableColumn<Workspace>[] = [
   },
 ];
 
-/* ═══════════════════════════════════════
+/* ══════════════════════════════════��════
    Templates Data (matches real DocuSign)
    ═════════════════��═════════════����══════ */
 
@@ -2655,7 +3099,7 @@ function OneNotaryStatusRow({ state, children }: { state: 'done' | 'current' | '
   </li>;
 }
 
-function I9OneNotary({ session, onExit }: { session: I9Session; onExit: () => void }) {
+function I9OneNotary({ session, onExit, onComplete }: { session: I9Session; onExit: () => void; onComplete: () => void }) {
   const [stage, setStage] = useState<OneNotaryStage>('eligibility');
   const [agreed, setAgreed] = useState({ docusign: true, onenotary: true });
   const [waitNotice, setWaitNotice] = useState(false);
@@ -2710,6 +3154,10 @@ function I9OneNotary({ session, onExit }: { session: I9Session; onExit: () => vo
           <figcaption><span><strong>Signer</strong> {signerName}</span><Inline gap="xs"><Icon name="video-camera" size="small" /><Icon name="microphone" size="small" /></Inline></figcaption>
           <img src="/onenotary-signer.png" alt={`Signer ${signerName} on video`} />
         </figure>
+        <div className="on-session-actions">
+          <Button kind="primary" onClick={onComplete}>Session complete</Button>
+          <Text size="xs" color="secondary">Select this once the documents are verified. The I-9 for {signerName} will be recorded as complete.</Text>
+        </div>
       </aside>
     </div>
   </div>;
@@ -2938,7 +3386,8 @@ function I9Section2Journey({ session, setSession, onExit, onFinish }: {
   </JourneyShell>;
 }
 
-function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate }: {
+function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items, onItemsChange, editor, onEditorChange, onUseTemplate, onI9Complete }: {
+  onI9Complete: (session: I9Session) => void;
   view: TemplatesSidebarView; onNavigate: (view: TemplatesSidebarView) => void; search: string; onSearchChange: (value: string) => void;
   items: TemplateItem[]; onItemsChange: React.Dispatch<React.SetStateAction<TemplateItem[]>>; editor: TemplateEditorState | null;
   onEditorChange: (editor: TemplateEditorState | null) => void; onUseTemplate: (item: TemplateItem) => void;
@@ -3065,6 +3514,11 @@ function TemplatesLibraryPage({ view, onNavigate, search, onSearchChange, items,
       setNotice(`${i9Session.recipientName} completed identity verification for Form I-9.`);
       setI9Session(null);
       setI9Phase('closed');
+    }} onComplete={() => {
+      onI9Complete(i9Session);
+      setI9Session(null);
+      setI9Pending(null);
+      setI9Phase('closed');
     }} />}
     {i9Phase === 'section2' && i9Pending && <I9Section2Journey session={i9Pending} setSession={setI9Pending} onExit={() => setI9Phase('closed')} onFinish={completed => {
       setI9Phase('closed');
@@ -3169,7 +3623,7 @@ const REPORTS_DATA: ReportItem[] = [
 
 /* ═══════════════════════════════════════
    Home Page
-   ═══════════════════════════════════════ */
+   ═══════════════════��═══════════════════ */
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -3618,7 +4072,7 @@ function HomeCreationDialog({ kind, initialFiles, initialData, onClose, onSave }
   );
 }
 
-/* ═══════════════════════════════════════
+/* ═══════════════���═══════════════════════
    Insights — Overview sub-view
    ═══════════════════════════════════════ */
 
@@ -3809,7 +4263,7 @@ function InsightsPage({ view, onNavigate, reports, onReportsChange, creator, onC
 
 /* ═════════���══════════��══════════════════
    Automations and Admin
-   ═══════════════════════════════════════ */
+   ═══════════════════���═══════════════════ */
 
 interface Workflow {
   id: string;
@@ -4238,7 +4692,7 @@ function AddUserDialog({ users, onClose, onSave }: { users: AccountUser[]; onClo
 const ADMIN_VIEW_LABELS = {
   overview: 'Overview', 'plan-billing': 'Plan and Billing', 'account-settings': 'Account Profile',
   'system-status': 'System Status', security: 'Security Settings', 'regional-settings': 'Regional Settings', branding: 'Brands',
-  updates: 'Updates', sandbox: 'Sandbox', 'value-calculator': 'Value Calculator', 'sound-settings': 'Sound Settings', 'ai-controls': 'AI Control Settings',
+  updates: 'Updates', sandbox: 'Sandbox', 'value-calculator': 'Value Calculator', 'sound-settings': 'Sound Settings', 'ai-controls': 'AI controls',
   users: 'Users', 'permission-profiles': 'Permission Profiles', groups: 'Groups', 'signing-groups': 'Signing Groups',
   'signing-settings': 'Signing Settings', 'sending-settings': 'Sending Settings', 'workspace-settings': 'Workspaces Settings',
   'identity-verification': 'Identity Verification', 'email-preferences': 'Email Preferences', 'email-archive': 'Email Archive Configuration',
@@ -4275,7 +4729,6 @@ interface AdminSettingField { id: string; label: string; description?: string; o
 const ADMIN_SETTING_PAGES: Partial<Record<AdminView, { description: string; fields: AdminSettingField[] }>> = {
   'regional-settings': { description: 'Choose the language, time zone, and date format used by your account.', fields: [{ id: 'language', label: 'Default language', options: ['English (US)', 'English (UK)', 'French', 'German', 'Spanish'] }, { id: 'timezone', label: 'Time zone', options: ['Pacific Time (US & Canada)', 'Eastern Time (US & Canada)', 'London'] }, { id: 'date-format', label: 'Date format', options: ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'] }] },
   'sound-settings': { description: 'Choose when Docusign plays a sound.', fields: [{ id: 'completion-sound', label: 'Play a sound when signing is complete' }, { id: 'notification-sound', label: 'Play notification sounds' }] },
-  'ai-controls': { description: 'Manage access to AI features for your account.', fields: [{ id: 'iris-enabled', label: 'Allow users to use Iris' }, { id: 'agreement-insights', label: 'Enable AI agreement insights' }] },
   'workspace-settings': { description: 'Set how teams organize and share agreements in workspaces.', fields: [{ id: 'workspace-creation', label: 'Allow users to create workspaces' }, { id: 'external-collaboration', label: 'Allow external collaborators' }] },
   'identity-verification': { description: 'Choose the identity verification options available to senders.', fields: [{ id: 'phone-verification', label: 'Allow phone authentication' }, { id: 'id-verification', label: 'Allow identity verification' }, { id: 'access-code', label: 'Allow recipient access codes' }] },
   'email-preferences': { description: 'Set which agreement updates are sent by email.', fields: [{ id: 'recipient-updates', label: 'Notify recipients when an agreement is completed' }, { id: 'sender-updates', label: 'Notify senders about recipient activity' }] },
@@ -4327,10 +4780,50 @@ function AdminSection({ title, description, children }: { title: string; descrip
   </Stack></Card.Body></Card>;
 }
 
-function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onNavigate }: {
+const ADMIN_ACCOUNT_ID = '48217603';
+
+interface RosterSummary { fileName: string; processed: number; added: number; matched: number; review: number; }
+interface PeopleHubState { enabled: boolean; roster: RosterSummary | null; profilesVisible: boolean; }
+
+function AiControlsSettings({ hub, onHubEnabledChange, onOpenPeopleHub }: {
+  hub: PeopleHubState; onHubEnabledChange: (enabled: boolean) => void; onOpenPeopleHub: () => void;
+}) {
+  const [anonymizedData, setAnonymizedData] = useState(false);
+  const [aiAssistant, setAiAssistant] = useState(true);
+  return <Stack gap="large" style={{ maxWidth: 720 }}>
+    <Text size="sm" color="secondary">{`Manage AI-powered features for account ${ADMIN_ACCOUNT_ID}. These settings apply to every user in the account. `}<Link href="https://support.docusign.com" target="_blank" rel="noopener noreferrer">Learn more.</Link></Text>
+    <AdminSection title="AI data controls" description="Manage how data is used for AI training. This helps us improve our products and solutions.">
+      <Switch label="Allow my anonymized data to be used to improve AI-assisted experiences" checked={anonymizedData} onChange={setAnonymizedData} />
+    </AdminSection>
+    <AdminSection title="AI features" description="Manage AI services for all users in your account.">
+      <Switch label="AI assistant and Agent Studio" description="Iris AI assistant and agents across Docusign, including ready-to-use and custom agents you can create." checked={aiAssistant} onChange={setAiAssistant} />
+      <Divider />
+      <Stack gap="small">
+        <Switch
+          label="Automatic HR agreement processing"
+          description={`Turns on People Hub for account ${ADMIN_ACCOUNT_ID}. Docusign AI processes HR agreements to build people profiles for everyone in the account. Before you turn this on, connect a supported HR system in the Docusign App Center (for example, the Workday Extension App). You can also upload a CSV of employee records in People Hub. Processing may take up to two days.`}
+          checked={hub.enabled}
+          onChange={onHubEnabledChange}
+        />
+        <Link href="https://apps.docusign.com/appcenter" target="_blank" rel="noopener noreferrer">Open the Docusign App Center</Link>
+        {hub.enabled && <Inline gap="small" align="center" wrap>
+          <Text size="sm" color="secondary">People Hub is on for this account.</Text>
+          <Button kind="secondary" size="small" onClick={onOpenPeopleHub}>Go to People Hub</Button>
+        </Inline>}
+      </Stack>
+    </AdminSection>
+    <Inline gap="small">
+      <Button kind="primary">Save</Button>
+      <Button kind="secondary">Cancel</Button>
+    </Inline>
+  </Stack>;
+}
+
+function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onNavigate, hub, onHubEnabledChange, onOpenPeopleHub }: {
   users: AccountUser[]; onUsersChange: React.Dispatch<React.SetStateAction<AccountUser[]>>;
   settings: AccountSettings; onSettingsChange: (settings: AccountSettings) => void;
   view: AdminView; onNavigate: (view: AdminView) => void;
+  hub: PeopleHubState; onHubEnabledChange: (enabled: boolean) => void; onOpenPeopleHub: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('Active and pending');
@@ -4517,8 +5010,8 @@ function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onN
     <Button kind="tertiary" size="small" onClick={() => { setSearch(''); setStatus('All statuses'); setPermissionFilter('All'); setGroupFilter('All'); setPage(1); }}>Clear All</Button>
   </Inline>;
   return <>
-    <AgreementTableView paddingVariant="compact" pageHeader={view === 'overview' ? null : <Stack gap="large"><PageHeader title={ADMIN_VIEW_LABELS[view]} actions={actions} />{view === 'users' && usersToolbar}</Stack>} banner={notice ? <Banner kind="success" onClose={() => setNotice('')}>{notice}</Banner> : undefined} filterBar={listViews.includes(view) ? <FilterBar search={{ value: search, onChange: value => { setSearch(value); setPage(1); }, placeholder: view === 'users' ? 'Search Here' : `Search ${ADMIN_VIEW_LABELS[view].toLowerCase()}` }} filters={view === 'users' ? userFilters : undefined} /> : null}>
-      {view === 'overview' ? overview : view === 'users' ? userList : view === 'groups' || view === 'signing-groups' ? <DataTable key={`admin-${view}`} columns={groupColumns} data={groups.filter(group => matchingIds.has(group.id))} getRowKey={group => group.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No groups match your search" pagination={resourcePagination} />
+    <AgreementTableView paddingVariant="compact" pageHeader={view === 'overview' ? null : <Stack gap="large"><PageHeader title={view === 'ai-controls' ? 'AI Control Settings' : ADMIN_VIEW_LABELS[view]} actions={actions} />{view === 'users' && usersToolbar}</Stack>} banner={notice ? <Banner kind="success" onClose={() => setNotice('')}>{notice}</Banner> : undefined} filterBar={listViews.includes(view) ? <FilterBar search={{ value: search, onChange: value => { setSearch(value); setPage(1); }, placeholder: view === 'users' ? 'Search Here' : `Search ${ADMIN_VIEW_LABELS[view].toLowerCase()}` }} filters={view === 'users' ? userFilters : undefined} /> : null}>
+      {view === 'overview' ? overview : view === 'ai-controls' ? <AiControlsSettings hub={hub} onHubEnabledChange={onHubEnabledChange} onOpenPeopleHub={onOpenPeopleHub} /> : view === 'users' ? userList : view === 'groups' || view === 'signing-groups' ? <DataTable key={`admin-${view}`} columns={groupColumns} data={groups.filter(group => matchingIds.has(group.id))} getRowKey={group => group.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No groups match your search" pagination={resourcePagination} />
         : view === 'permission-profiles' ? <DataTable key="admin-profiles" columns={profileColumns} data={profiles.filter(profile => matchingIds.has(profile.id))} getRowKey={profile => profile.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No permission profiles match your search" pagination={resourcePagination} />
         : view === 'integrations' ? <DataTable key="admin-connections" columns={connectionColumns} data={connections.filter(connection => matchingIds.has(connection.id))} getRowKey={connection => connection.id} rowHeight="tall" stickyHeader showColumnControl emptyMessage="No connected apps match your search" pagination={resourcePagination} />
         : isSettingsView ? <form id={settingsFormId} onSubmit={event => { event.preventDefault(); if (!draft.name.trim()) return; const saved = { ...draft, name: draft.name.trim() }; setDraft(saved); onSettingsChange(saved); setNotice(`${ADMIN_VIEW_LABELS[view]} saved.`); }}>{view === 'account-settings' ? settingsView : pageConfiguration ? genericSettings : configuration}</form>
@@ -4533,7 +5026,7 @@ function AdminPage({ users, onUsersChange, settings, onSettingsChange, view, onN
   </>;
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════��══════════════════
    Footer
    ═══════════════════════════════════════ */
 
@@ -5643,7 +6136,7 @@ function WorkspaceDetailView({ workspace, onClose }: { workspace: Workspace; onC
 
 /* ═══════════════════════════════════════
    Request Detail View
-   ══════════════════════════���════════════ */
+   ════════════════���═════════���════════════ */
 
 function RequestInfoCard({ request }: { request: RequestItem }) {
   const requestType = request.requestType;
@@ -5959,6 +6452,14 @@ function PrototypeApp() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('completed');
   const [organizationsData, setOrganizationsData] = useState<Organization[]>(ORGANIZATIONS_DATA);
   const [peopleData, setPeopleData] = useState<Person[]>(PEOPLE_DATA);
+  const [peopleHub, setPeopleHub] = useState<PeopleHubState>({ enabled: false, roster: null, profilesVisible: false });
+  const setPeopleHubEnabled = (enabled: boolean) => setPeopleHub(enabled ? { ...peopleHub, enabled } : { enabled: false, roster: null, profilesVisible: false });
+  const hasRoster = Boolean(peopleHub.roster);
+  useEffect(() => {
+    if (!hasRoster || peopleHub.profilesVisible) return;
+    const timer = window.setTimeout(() => setPeopleHub(current => ({ ...current, profilesVisible: true })), 6000);
+    return () => window.clearTimeout(timer);
+  }, [hasRoster, peopleHub.profilesVisible]);
 
   const mergePartyRecords = (type: PartiesView, merged: Organization | Person, removedIds: string[]) => {
     if (type === 'organizations') {
@@ -6482,6 +6983,17 @@ function PrototypeApp() {
     view={templatesSidebarView} onNavigate={navigateTemplateView} search={search} onSearchChange={setSearch}
     items={templateItems} onItemsChange={setTemplateItems} editor={templateEditor} onEditorChange={setTemplateEditor}
     onUseTemplate={useLibraryTemplate}
+    onI9Complete={session => {
+      const email = session.recipientEmail.toLowerCase();
+      setPeopleData(current => {
+        const match = current.find(person => person.emails.some(item => item.toLowerCase() === email) || person.name.toLowerCase() === session.recipientName.toLowerCase());
+        if (match) return current.map(person => person.id === match.id ? { ...person, verified: true } : person);
+        return [{ id: `i9-${Date.now()}`, name: session.recipientName, employeeId: '', applicantId: '', employmentType: 'Full-time', status: 'Employee', location: '', emails: [session.recipientEmail], phone: '', hireDate: session.startDate, verified: true }, ...current];
+      });
+      setPeopleHub(current => ({ enabled: true, roster: current.roster, profilesVisible: true }));
+      handleTabClick('agreements');
+      setSidebarView('parties-people');
+    }}
   />;
 
   /* ── Insights content ── */
@@ -6496,6 +7008,10 @@ function PrototypeApp() {
       organizationsData={organizationsData}
       peopleData={peopleData}
       onMerge={mergePartyRecords}
+      hub={peopleHub}
+      onOpenHubSettings={() => { handleTabClick('admin'); setAdminView('ai-controls'); }}
+      onImportRoster={roster => setPeopleHub(current => ({ ...current, roster }))}
+      onShowProfiles={() => setPeopleHub(current => ({ ...current, profilesVisible: true }))}
     />
   ) : (
     <AgreementTableView
@@ -6673,7 +7189,7 @@ function PrototypeApp() {
     templates: templatesContent,
     automations: <AutomationsPage workflows={workflows} onChange={setWorkflows} view={automationView} onNavigate={setAutomationView} />,
     insights: insightsContent,
-    admin: <AdminPage users={accountUsers} onUsersChange={setAccountUsers} settings={accountSettings} onSettingsChange={setAccountSettings} view={adminView} onNavigate={setAdminView} />,
+    admin: <AdminPage users={accountUsers} onUsersChange={setAccountUsers} settings={accountSettings} onSettingsChange={setAccountSettings} view={adminView} onNavigate={setAdminView} hub={peopleHub} onHubEnabledChange={setPeopleHubEnabled} onOpenPeopleHub={() => { handleTabClick('agreements'); setSidebarView('parties-people'); }} />,
     scenarios: <ScenariosPage onRun={runScenario} />,
     tokens: <TokenPreviewPage />,
   };
