@@ -988,50 +988,218 @@ function I9EvidenceModal({ person, onClose }: { person: Person; onClose: () => v
   );
 }
 
-function PersonProfile({ person, onBack }: { person: Person; onBack: () => void }) {
-  const [tab, setTab] = useState('details');
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
+type DocStatus = 'found' | 'not-found' | 'none';
+interface PersonDoc {
+  id: string;
+  name: string;
+  type: string;
+  source: string;
+  clawbacks: DocStatus;
+  separation: DocStatus;
+  workForHire: DocStatus;
+  isI9?: boolean;
+}
+
+const I9_DOC: PersonDoc = { id: 'i9', name: 'I-9 Employee Verification', type: 'I-9', source: 'One Notary', clawbacks: 'none', separation: 'none', workForHire: 'none', isI9: true };
+
+const DALE_DOCS: PersonDoc[] = [
+  I9_DOC,
+  { id: 'passport', name: 'Passport Scan', type: 'Supplemental Document', source: 'One Notary', clawbacks: 'none', separation: 'none', workForHire: 'none' },
+  { id: 'offer', name: 'Offer Letter_Dale Simmons', type: 'Offer Letter', source: 'Greenhouse', clawbacks: 'found', separation: 'found', workForHire: 'found' },
+  { id: 'nda', name: 'Non-Disclosure Agreement_Dale Simmons', type: 'NDA', source: 'Greenhouse', clawbacks: 'not-found', separation: 'not-found', workForHire: 'not-found' },
+  { id: 'wage', name: 'California Wage Theft Provision Notice', type: 'Policy', source: 'Greenhouse', clawbacks: 'not-found', separation: 'not-found', workForHire: 'not-found' },
+  { id: 'ciianca', name: 'Confidential Information, Invention Assignment', type: 'CIIANCA', source: 'Greenhouse', clawbacks: 'not-found', separation: 'not-found', workForHire: 'not-found' },
+];
+
+const documentsFor = (person: Person): PersonDoc[] => {
+  if (person.name === 'Dale Simmons') return DALE_DOCS;
+  return person.verified ? [I9_DOC] : [];
+};
+
+function DocStatusCell({ status }: { status: DocStatus }) {
+  if (status === 'none') return <Text size="sm" color="secondary">-</Text>;
+  const found = status === 'found';
+  return (
+    <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap', color: found ? 'var(--ink-green-100)' : 'var(--ink-orange-100)' }}>
+      <Icon name={found ? 'check' : 'status-error'} size="small" />
+      <Text size="sm" style={{ color: 'inherit' }}>{found ? 'Found' : 'Not found'}</Text>
+    </Inline>
+  );
+}
+
+function ProfileField({ label, value, source }: { label: string; value: string; source?: string }) {
+  return (
+    <Inline justify="between" align="end" gap="medium" style={{ flexWrap: 'nowrap' }}>
+      <Stack gap="xs">
+        <Text size="xs" weight="semibold">{label.toUpperCase()}</Text>
+        <Text>{value}</Text>
+      </Stack>
+      {source && (
+        <Text size="sm" color="secondary">Source: <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => event.preventDefault()}>{source}</Link></Text>
+      )}
+    </Inline>
+  );
+}
+
+function PersonDetails({ person, onViewVerifications }: { person: Person; onViewVerifications: () => void }) {
   const verifications = [
     { id: 'clear', label: 'Clear', ok: true },
     { id: 'i9', label: 'I-9 Employment Verification', ok: person.verified },
   ];
+  const workEmail = person.emails.find((email) => !/@(gmail|yahoo|outlook)\./.test(email));
+  const personalEmail = person.emails.find((email) => /@(gmail|yahoo|outlook)\./.test(email));
+  const contact = [
+    person.phone && { label: 'Phone', value: person.phone },
+    workEmail && { label: 'Work email', value: workEmail },
+    personalEmail && { label: 'Personal email', value: personalEmail },
+  ].filter(Boolean) as { label: string; value: string }[];
+  const employee = [
+    person.applicantId && { label: 'Applicant ID', value: person.applicantId, source: 'Greenhouse' },
+    person.employeeId && { label: 'Employee ID', value: person.employeeId, source: 'Workday' },
+    person.employmentType && { label: 'Employment type', value: person.employmentType },
+    person.status && { label: 'Status', value: person.status },
+    person.location && { label: 'Location', value: person.location },
+    person.hireDate && { label: 'Hire date', value: person.hireDate },
+  ].filter(Boolean) as { label: string; value: string; source?: string }[];
+  const sources = [
+    person.applicantId && 'Greenhouse',
+    person.employeeId && 'Workday',
+  ].filter(Boolean) as string[];
+
+  return (
+    <Inline gap="large" align="start" style={{ flexWrap: 'wrap' }}>
+      <Stack gap="large" style={{ flex: '1 1 calc(var(--ink-spacing-300) * 14)', minWidth: 0, maxWidth: 'calc(var(--ink-spacing-300) * 22)' }}>
+        <Stack gap="xs">
+          <Text size="xs" weight="semibold">NAME</Text>
+          <Text>{person.name}</Text>
+        </Stack>
+        <Stack gap="small">
+          <Text size="xs" weight="semibold">VERIFICATIONS</Text>
+          {verifications.map((v) => (
+            <Inline key={v.id} gap="small" align="center" justify="between" style={{ flexWrap: 'nowrap' }}>
+              <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
+                <span style={{ display: 'inline-flex', color: v.ok ? 'var(--ink-green-100)' : 'inherit' }}>
+                  <Icon name={v.ok ? 'status-check' : 'shield'} size="small" />
+                </span>
+                <Text>{v.label}</Text>
+              </Inline>
+              {v.ok && <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); onViewVerifications(); }}>View Verifications</Link>}
+            </Inline>
+          ))}
+        </Stack>
+        {sources.length > 0 && (
+          <Stack gap="small">
+            <Text size="xs" weight="semibold">DATA SOURCES</Text>
+            {sources.map((source) => (
+              <Card key={source}>
+                <Inline justify="between" align="center" gap="small" style={{ flexWrap: 'nowrap' }}>
+                  <Inline gap="small" align="center" style={{ flexWrap: 'nowrap' }}>
+                    <Avatar size="small" initials={initialsOf(source)} />
+                    <Text weight="semibold">{source}</Text>
+                  </Inline>
+                  <Text size="sm" color="secondary">(Synced 2 hours ago)</Text>
+                </Inline>
+              </Card>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+      <div style={{ flex: '2 1 calc(var(--ink-spacing-300) * 20)', minWidth: 0 }}>
+        <Accordion
+          bordered
+          allowMultiple
+          defaultOpenItems={['contact', 'employee']}
+          items={[
+            {
+              id: 'contact',
+              title: 'Contact information',
+              metadata: String(contact.length),
+              content: <Stack gap="medium">{contact.map((f) => <ProfileField key={f.label} {...f} />)}</Stack>,
+            },
+            {
+              id: 'employee',
+              title: 'Employee details',
+              metadata: String(employee.length),
+              content: <Stack gap="medium">{employee.map((f) => <ProfileField key={f.label} {...f} />)}</Stack>,
+            },
+          ]}
+        />
+      </div>
+    </Inline>
+  );
+}
+
+function PersonDocuments({ person, onOpenI9 }: { person: Person; onOpenI9: () => void }) {
+  const docs = documentsFor(person);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState(PARTY_FILTER_ALL);
+  const [sourceFilter, setSourceFilter] = useState(PARTY_FILTER_ALL);
+  const visible = docs.filter((d) =>
+    d.name.toLowerCase().includes(search.trim().toLowerCase()) &&
+    (typeFilter === PARTY_FILTER_ALL || d.type === typeFilter) &&
+    (sourceFilter === PARTY_FILTER_ALL || d.source === sourceFilter));
+  const columns: DataTableColumn<PersonDoc>[] = [
+    {
+      key: 'name', header: 'Name', sortable: true, width: '34%',
+      cell: (row) => (
+        <Stack gap="none">
+          {row.isI9
+            ? <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); onOpenI9(); }}>{row.name}</Link>
+            : <Text size="sm" weight="semibold">{row.name}</Text>}
+          <Text size="xs" color="secondary">{`Source: ${row.source}`}</Text>
+        </Stack>
+      ),
+    },
+    { key: 'type', header: 'Type', sortable: true, cell: (row) => <Text size="sm">{row.type}</Text> },
+    { key: 'clawbacks', header: 'Clawbacks', sortable: true, cell: (row) => <DocStatusCell status={row.clawbacks} /> },
+    { key: 'separation', header: 'Separation', sortable: true, cell: (row) => <DocStatusCell status={row.separation} /> },
+    { key: 'workForHire', header: 'Work for hire', sortable: true, cell: (row) => <DocStatusCell status={row.workForHire} /> },
+  ];
+  return (
+    <Stack gap="medium">
+      <FilterBar
+        search={{ value: search, onChange: setSearch, placeholder: 'Search Documents' }}
+        filters={(
+          <Inline gap="small">
+            <PartyFilterMenu label="Type" value={typeFilter} options={[...new Set(docs.map((d) => d.type))]} onChange={setTypeFilter} />
+            <PartyFilterMenu label="Source" value={sourceFilter} options={[...new Set(docs.map((d) => d.source))]} onChange={setSourceFilter} />
+          </Inline>
+        )}
+      />
+      <DataTable columns={columns} data={visible} getRowKey={(row) => row.id} emptyMessage="No documents found" />
+    </Stack>
+  );
+}
+
+function PersonProfile({ person, onBack }: { person: Person; onBack: () => void }) {
+  const [tab, setTab] = useState('documents');
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [starred, setStarred] = useState(false);
   return (
     <Container style={{ paddingBlock: 'var(--ink-spacing-400)' }}>
       <Stack gap="medium">
         <Breadcrumb items={[{ label: 'People', href: '#' }, { label: person.name }]} onItemClick={(_item: unknown, index: number) => { if (index === 0) onBack(); }} />
-        <PageHeader title={person.name} showAIBadge aiBadgeText="AI-Assisted" />
+        <Inline justify="between" align="center" gap="medium" style={{ flexWrap: 'wrap' }}>
+          <Inline gap="small" align="center">
+            <Heading level={1}>{person.name}</Heading>
+            {person.verified && <I9Indicator />}
+            <AIBadge infoContent={false} />
+          </Inline>
+          <Inline gap="small" align="center">
+            <IconButton icon={starred ? 'star-filled' : 'star'} variant="tertiary" aria-label={starred ? `Remove ${person.name} from favorites` : `Add ${person.name} to favorites`} aria-pressed={starred} onClick={() => setStarred((value) => !value)} />
+            <Button kind="secondary" startElement={<Icon name="pencil" />}>Edit Details</Button>
+            <Button kind="secondary" startElement={<Icon name="upload" />}>Upload</Button>
+          </Inline>
+        </Inline>
         <Tabs
           aria-label="Person sections"
           value={tab}
           onChange={setTab}
           tabs={[{ id: 'documents', label: 'Documents' }, { id: 'details', label: 'Details' }, { id: 'clauses', label: 'Clauses' }]}
         />
-        {tab === 'details' ? (
-          <Stack gap="large">
-            <Stack gap="small">
-              <Text size="xs" weight="semibold">NAME</Text>
-              <Text>{person.name}</Text>
-            </Stack>
-            <Stack gap="small">
-              <Text size="xs" weight="semibold">VERIFICATIONS</Text>
-              {verifications.map((v) => (
-                <Inline key={v.id} gap="small" align="center" justify="between" style={{ flexWrap: 'nowrap', maxWidth: 'calc(var(--ink-spacing-300) * 20)' }}>
-                  <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
-                    <Icon name={v.ok ? 'status-check' : 'shield'} size="small" />
-                    <Text>{v.label}</Text>
-                  </Inline>
-                  {v.ok && <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); setEvidenceOpen(true); }}>View Verifications</Link>}
-                </Inline>
-              ))}
-            </Stack>
-            <Stack gap="small">
-              <Text size="xs" weight="semibold">EMAIL</Text>
-              {person.emails.map((email) => <Text key={email}>{email}</Text>)}
-            </Stack>
-          </Stack>
-        ) : (
-          <Text color="secondary">Nothing to show here in this prototype.</Text>
-        )}
+        {tab === 'details' && <PersonDetails person={person} onViewVerifications={() => setEvidenceOpen(true)} />}
+        {tab === 'documents' && <PersonDocuments person={person} onOpenI9={() => setEvidenceOpen(true)} />}
+        {tab === 'clauses' && <Text color="secondary">Nothing to show here in this prototype.</Text>}
       </Stack>
       {evidenceOpen && <I9EvidenceModal person={person} onClose={() => setEvidenceOpen(false)} />}
     </Container>
@@ -3799,7 +3967,7 @@ function HomeCreationDialog({ kind, initialFiles, initialData, onClose, onSave }
   );
 }
 
-/* ═══════════════════════════════════════
+/* ═══════════════���═══════════════════════
    Insights — Overview sub-view
    ═══════════════════════════════════════ */
 
