@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useId, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import powerFormsEmptyArt from '@/assets/powerforms-empty.svg';
+import idLicenseArt from '@/assets/id-license.png';
+import idSsnArt from '@/assets/id-ssn.png';
 import {
   DocuSignShell,
   AgreementTableView,
@@ -254,7 +256,7 @@ type SidebarView = 'all-agreements' | 'drafts' | 'in-progress' | 'completed' | '
 type TemplatesSidebarView = 'my-templates' | 'shared-with-me' | 'favorites' | 'all-templates' | 'clauses' | 'document-templates' | 'workspace-templates' | 'workflow-templates' | 'my-web-forms' | 'shared-web-forms' | 'all-web-forms' | 'elastic-templates';
 type InsightsSidebarView = 'overview' | 'dashboards' | 'reports' | 'my-dashboard' | 'admin-dashboard' | 'agreements-dashboard' | 'obligations-dashboard' | 'renewals-dashboard' | 'requests-dashboard' | 'ai-usage-dashboard' | 'procurement-hub' | 'custom-obligations' | 'custom-dashboard';
 
-/* ═════════════════�����══════����══════════════
+/* ═════════════════�������══════����══════════════
    Agreements Data
    ═══════════════════════════════════════ */
 
@@ -924,13 +926,125 @@ const organizationColumns: DataTableColumn<Organization>[] = [
   { key: 'totalAgreements', header: 'Total agreements', sortable: true, cell: (row) => <Text size="sm">{row.totalAgreements}</Text> },
 ];
 
-const personColumns: DataTableColumn<Person>[] = [
+const I9_AUTHORISED_SUMMARY = 'I-9 Employment authorised by Anna Oh via On demand (OneNotary) on 10/2/2025 6:36:31 am PDT';
+
+function I9Indicator() {
+  return (
+    <Tooltip text={I9_AUTHORISED_SUMMARY} location="above" alignment="start">
+      <span tabIndex={0} role="img" aria-label={I9_AUTHORISED_SUMMARY} style={{ display: 'inline-flex' }}>
+        <Icon name="shield-check" size="small" />
+      </span>
+    </Tooltip>
+  );
+}
+
+function I9EvidenceModal({ person, onClose }: { person: Person; onClose: () => void }) {
+  const [backShown, setBackShown] = useState<Record<string, boolean>>({});
+  const documents = [
+    { id: 'license', title: "Driver's license or ID card issued by a State", list: 'List B', art: idLicenseArt, alt: 'California driver license, front' },
+    { id: 'ssn', title: 'U.S. Social Security Card', list: 'List C', art: idSsnArt, alt: 'Social Security card' },
+  ];
+  return (
+    <Modal open size="large" title="ID Evidence" onClose={onClose}>
+      <Stack gap="large">
+        <Inline gap="medium" align="start" style={{ flexWrap: 'nowrap' }}>
+          <Icon name="status-check" size="medium" />
+          <Stack gap="small">
+            <Heading level={3}>{`Employment authorized for ${person.name}`}</Heading>
+            <Text size="sm" color="secondary">ID verification session completed by OneNotary on 10/2/2025 6:36:31 am PDT</Text>
+          </Stack>
+        </Inline>
+        <Stack gap="small">
+          <Text size="sm" weight="semibold">E-Verify status</Text>
+          <Inline gap="xs"><Badge kind="success">Employment authorized</Badge></Inline>
+          <Text size="sm" color="secondary">Case #324234523</Text>
+        </Stack>
+        <Stack gap="small">
+          <Text size="sm" weight="semibold">Type of documents</Text>
+          <ol style={{ margin: 0, paddingInlineStart: 'var(--ink-spacing-300)' }}>
+            {documents.map((d) => (
+              <li key={d.id}><Text size="sm">{d.title} <Text as="span" size="sm" color="secondary">({d.list})</Text></Text></li>
+            ))}
+          </ol>
+        </Stack>
+        <Divider />
+        {documents.map((d) => (
+          <Stack key={d.id} gap="small">
+            <img
+              src={d.art}
+              alt={backShown[d.id] ? `${d.alt}, back view requested` : d.alt}
+              style={{ width: '100%', display: 'block', borderRadius: 'var(--ink-spacing-100)' }}
+            />
+            <Inline gap="none">
+              <Button kind="secondary" size="small" onClick={() => setBackShown((c) => ({ ...c, [d.id]: !c[d.id] }))}>View Back</Button>
+            </Inline>
+          </Stack>
+        ))}
+        <Banner kind="information" closable={false}>
+          {`This identity verification was done on ${person.name} (${person.emails[person.emails.length - 1]}) for Envelope ID F77923AF4D0940E196CEAD4FD6B7ADFB.`}
+        </Banner>
+      </Stack>
+    </Modal>
+  );
+}
+
+function PersonProfile({ person, onBack }: { person: Person; onBack: () => void }) {
+  const [tab, setTab] = useState('details');
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const verifications = [
+    { id: 'clear', label: 'Clear', ok: true },
+    { id: 'i9', label: 'I-9 Employment Verification', ok: person.verified },
+  ];
+  return (
+    <Container style={{ paddingBlock: 'var(--ink-spacing-400)' }}>
+      <Stack gap="medium">
+        <Breadcrumb items={[{ label: 'People', href: '#' }, { label: person.name }]} onItemClick={(_item: unknown, index: number) => { if (index === 0) onBack(); }} />
+        <PageHeader title={person.name} showAIBadge aiBadgeText="AI-Assisted" />
+        <Tabs
+          aria-label="Person sections"
+          value={tab}
+          onChange={setTab}
+          tabs={[{ id: 'documents', label: 'Documents' }, { id: 'details', label: 'Details' }, { id: 'clauses', label: 'Clauses' }]}
+        />
+        {tab === 'details' ? (
+          <Stack gap="large">
+            <Stack gap="small">
+              <Text size="xs" weight="semibold">NAME</Text>
+              <Text>{person.name}</Text>
+            </Stack>
+            <Stack gap="small">
+              <Text size="xs" weight="semibold">VERIFICATIONS</Text>
+              {verifications.map((v) => (
+                <Inline key={v.id} gap="small" align="center" justify="between" style={{ flexWrap: 'nowrap', maxWidth: 'calc(var(--ink-spacing-300) * 20)' }}>
+                  <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
+                    <Icon name={v.ok ? 'status-check' : 'shield'} size="small" />
+                    <Text>{v.label}</Text>
+                  </Inline>
+                  {v.ok && <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); setEvidenceOpen(true); }}>View Verifications</Link>}
+                </Inline>
+              ))}
+            </Stack>
+            <Stack gap="small">
+              <Text size="xs" weight="semibold">EMAIL</Text>
+              {person.emails.map((email) => <Text key={email}>{email}</Text>)}
+            </Stack>
+          </Stack>
+        ) : (
+          <Text color="secondary">Nothing to show here in this prototype.</Text>
+        )}
+      </Stack>
+      {evidenceOpen && <I9EvidenceModal person={person} onClose={() => setEvidenceOpen(false)} />}
+    </Container>
+  );
+}
+
+const makePersonColumns = (onOpen: (person: Person) => void): DataTableColumn<Person>[] => [
   {
     key: 'name', header: 'Name', sortable: true, width: '24%',
     cell: (row) => (
       <Inline gap="xs" align="center" style={{ flexWrap: 'nowrap' }}>
-        <Text size="sm" weight="semibold">{row.name}</Text>
-        {row.verified && <Icon name="shield-check" size="small" aria-label="Verified" />}
+        <Link kind="subtle" size="small" href="#" onClick={(event: React.MouseEvent) => { event.preventDefault(); onOpen(row); }}>{row.name}</Link>
+        {row.verified && <I9Indicator />}
       </Inline>
     ),
   },
@@ -1553,6 +1667,8 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ column?: string; direction: 'ascending' | 'descending' | null }>({ direction: null });
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const personColumns = useMemo(() => makePersonColumns((person) => setProfileId(person.id)), []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setLoading(false), 500);
@@ -1645,6 +1761,9 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
     pagination: { page: 1, pageSize: 25 as const, totalItems: rowCount, onPageChange: () => {}, onPageSizeChange: () => {}, showInfo: true },
   };
 
+  const openedPerson = !isOrganizations ? peopleData.find((p) => p.id === profileId) : undefined;
+  if (openedPerson) return <PersonProfile person={openedPerson} onBack={() => setProfileId(null)} />;
+
   return (
     <AgreementTableView
       paddingVariant="default"
@@ -1730,7 +1849,7 @@ function PartiesPageContent({ view, onAskIris, organizationsData, peopleData, on
 
 /* ═══════════════════════════════════════
    Requests Data (matches real DocuSign)
-   ════════════════════════════���═��═��══════ */
+   ════════════════════════════�����═��═��══════ */
 
 interface RequestItem {
   id: string;
@@ -1876,7 +1995,7 @@ const workspaceColumns: DataTableColumn<Workspace>[] = [
   },
 ];
 
-/* ═══════════════════════════════════════
+/* ══════════════════════════════════��════
    Templates Data (matches real DocuSign)
    ═════════════════��═════════════����══════ */
 
